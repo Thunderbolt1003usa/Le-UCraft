@@ -495,11 +495,14 @@ static void s2cHandler()
                 }
                 currentPlayer->swing_arm_event = 0;
             }
-            if (currentPlayer->entity_action_event )
+            if (currentPlayer->entity_action_event)
             {
-                if(currentPlayer->entity_action_id & 0x20){
+                if (currentPlayer->entity_action_id & 0x20)
+                {
                     PlayS2Centitydata(currentPlayer, ENTITY_POSE, ENTITY_DATA_POSE, STATE_SNEAKING);
-                }else{
+                }
+                else
+                {
                     PlayS2Centitydata(currentPlayer, ENTITY_POSE, ENTITY_DATA_POSE, STATE_STANDING);
                 }
                 currentPlayer->entity_action_event = 0;
@@ -715,7 +718,7 @@ int UCraftStart(uint8_t *cleanup_flag)
                         }
                         continue;
                     }
-                    if (read_size > 0 && read_size < READBUFSIZE)
+                    if (read_size > 0)
                     {
                         readPacketValue->pktsize = read_size;
                     }
