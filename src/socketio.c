@@ -412,7 +412,7 @@ void sendByte(uint8_t b)
 }
 void sendPlayPacketHeader(size_t id)
 {
-  if (id < S2C_PLAY_MAPPING_LEN && id > 0)
+  if (id < S2C_PLAY_MAPPING_LEN)
   {
     sendByte(id);
     return;
@@ -422,7 +422,7 @@ void sendPlayPacketHeader(size_t id)
 }
 void sendConfigurationPacketHeader(size_t id)
 {
-  if (id < S2C_CONFIGURATION_MAPPING_LEN && id > 0)
+  if (id < S2C_CONFIGURATION_MAPPING_LEN)
   {
     sendByte(id);
     return;
