@@ -160,7 +160,7 @@ uint8_t playerRemove(player_t *player)
   mbedtls_aes_free(&player->aes_ctx);
 #endif /*ONLINE_MODE*/
 #ifdef ONLINE_MODE_AUTH
-  if (strnlen(player->name, sizeof(((player_t *)0)->name) > 0))
+  if (strnlen(player->name, sizeof(((player_t *)0)->name)) > 0)
   {
     httpsFreePlayer(player);
   }
