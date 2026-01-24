@@ -384,42 +384,8 @@ static void s2cHandler()
                 }
             }
         }
-        if (currentPlayer->packet_dispatch_event)
-        {
-            if (currentPlayer->packet_timeout > SEND_PACKET_TIMEOUT)
-            {
-                currentPlayer->remove_player_event = 1;
-            }
-            else
-            {
-                size_t remaining = currentPlayer->packet_len - currentPlayer->packet_sent;
-                if (remaining == 0)
-                {
-                    if (currentPlayer->packet == NULL)
-                    {
-                        printl(LOG_ERROR, "WTF, idk why this is null\n");
-                        currentPlayer->remove_player_event = 1;
-                        return;
-                    }
-                    U_free(currentPlayer->packet);
-                    currentPlayer->packet_len = 0;
-                    currentPlayer->packet_sent = 0;
-                    currentPlayer->packet = NULL;
-                    currentPlayer->packet_dispatch_event = 0;
-                }
-                else
-                {
-                    size_t totalSent = sendData(&currentPlayer->packet[currentPlayer->packet_sent], remaining);
-                    currentPlayer->packet_sent += totalSent;
-                }
-            }
-            currentPlayer->packet_timeout++;
-        }
-        else
-        {
-            currentPlayer->packet_timeout = 0;
-            sendDispatch();
-        }
+        sendDispatch();
+        sendFlush(currentPlayer);
         currentPlayer->global_buffer_start_index = 0;
         currentPlayer->global_buffer_end_index = 0;
     }

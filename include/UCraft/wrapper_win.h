@@ -6,6 +6,8 @@
 #include <string.h>
 #include <winsock2.h>
 #include <stdint.h>
+#include <errno.h>
+
 
 // ssize_t is not defined in windows
 #if SIZE_MAX == UINT_MAX

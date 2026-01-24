@@ -5,7 +5,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 
 struct readPacketVars_t
 {
@@ -67,10 +66,11 @@ void sendclearGlobalBuffer();
 void sendGlobalBuffer(player_t *player);
 
 // writing utils, one player context only.
-size_t sendData(uint8_t *data, size_t packetsize);
+size_t sendData(uint8_t *data, size_t packetsize, int *blocked);
 void sendStartPlayer(player_t *player);
 void sendMainByte(uint8_t byte);
 void sendDispatch();
+void sendFlush(player_t *player);
 uint8_t sendAllowed();
 void sendStart();
 void sendByte(uint8_t b);
