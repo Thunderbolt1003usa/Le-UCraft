@@ -11,6 +11,16 @@
 #include "game.h"
 typedef struct gamePlayerData_t gamePlayerData_t;
 typedef struct player_t player_t;
+typedef struct out_packet_t out_packet_t;
+
+struct out_packet_t
+{
+  uint8_t *data;
+  size_t len;
+  size_t sent;
+  out_packet_t *next;
+};
+
 struct player_t
 {
   // General
@@ -69,9 +79,8 @@ struct player_t
   uint8_t swing_arm_event : 1;
   uint8_t entity_action_event : 1;
   // Packet
-  uint8_t packet_dispatch_event : 1;
-  size_t packet_len, packet_sent, packet_timeout;
-  uint8_t *packet;
+  out_packet_t *out_head;
+  out_packet_t *out_tail;
   // Chunk
   int32_t chunk_x, chunk_z, chunk_px, chunk_pz;
   // Player skin

@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <netdb.h>
 #include <fcntl.h>
+#include <errno.h>
 // Misc functions
 static inline void U_wrapperStart()
 {

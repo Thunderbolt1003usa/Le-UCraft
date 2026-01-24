@@ -244,10 +244,14 @@ void sendGlobalBuffer(player_t *player)
     sendMainByte(sendPacketVars.globalbuffer[i]);
   }
 }
-size_t sendData(uint8_t *data, size_t buffersize)
+size_t sendData(uint8_t *data, size_t buffersize, int *blocked)
 {
   int sock = sendPacketVars.player->fd;
   size_t totalSent = 0;
+  if (blocked != NULL)
+  {
+    *blocked = 0;
+  }
   // split the packet in fragments
   while (totalSent < buffersize)
   {
@@ -257,30 +261,22 @@ size_t sendData(uint8_t *data, size_t buffersize)
 
     if (r < 0)
     {
-      // the issue with EAGAIN is that if we loop over it again with no delay, it will not work so for now just simply dispatch the packet later
-      if (errno == EAGAIN || errno == 0)
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
       {
-        if (sendPacketVars.player->packet)
+        if (blocked != NULL)
         {
-          printl(LOG_WARN, "Packet already exists! try again later\n");
-          return totalSent;
+          *blocked = 1;
         }
-        // allocate the packet
-        sendPacketVars.player->packet = U_malloc(remaining);
-        if (sendPacketVars.player->packet == NULL)
-        {
-          printl(LOG_ERROR, "Memory allocation failed alt packet!\n");
-          sendPacketVars.player->remove_player_event = 1;
-          return totalSent;
-        }
-        // copy the packet
-        sendPacketVars.player->packet_len = remaining;
-        memcpy(sendPacketVars.player->packet, (char *)data + totalSent, remaining);
-        sendPacketVars.player->packet_dispatch_event = 1;
         return totalSent;
       }
       printl(LOG_ERROR, "could not send (%d) code %ld (%p %ld)\n", sock, r, data, totalSent);
       printl(LOG_ERROR, "errno: %s\n", strerror(errno));
+      sendPacketVars.player->remove_player_event = 1;
+      return totalSent;
+    }
+    if (r == 0)
+    {
+      printl(LOG_ERROR, "could not send (%d) code %ld (%p %ld)\n", sock, r, data, totalSent);
       sendPacketVars.player->remove_player_event = 1;
       return totalSent;
     }
@@ -338,11 +334,54 @@ void sendMainByte(uint8_t byte)
   }
   sendPacketVars.buffer[sendPacketVars.bufferindex++] = byte;
 }
+static void sendQueueData(const uint8_t *data, size_t len)
+{
+  if (len == 0)
+  {
+    return;
+  }
+  if (sendPacketVars.player == NULL)
+  {
+    return;
+  }
+  out_packet_t *pkt = U_malloc(sizeof(out_packet_t));
+  if (pkt == NULL)
+  {
+    printl(LOG_ERROR, "Memory allocation failed packet queue!\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  pkt->data = U_malloc(len);
+  if (pkt->data == NULL)
+  {
+    printl(LOG_ERROR, "Memory allocation failed packet data!\n");
+    U_free(pkt);
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  memcpy(pkt->data, data, len);
+  pkt->len = len;
+  pkt->sent = 0;
+  pkt->next = NULL;
+  if (sendPacketVars.player->out_tail)
+  {
+    sendPacketVars.player->out_tail->next = pkt;
+  }
+  else
+  {
+    sendPacketVars.player->out_head = pkt;
+  }
+  sendPacketVars.player->out_tail = pkt;
+}
 void sendDispatch()
 {
   // send the data
   if (sendPacketVars.bufferindex != 0)
   {
+    if (sendPacketVars.player->out_head != NULL)
+    {
+      sendFlush(sendPacketVars.player);
+    }
 #ifdef ONLINE_MODE
     if (sendPacketVars.player->encryption_recv_event)
     {
@@ -354,7 +393,72 @@ void sendDispatch()
       }
     }
 #endif /*ONLINE_MODE*/
-    sendData(sendPacketVars.buffer, sendPacketVars.bufferindex);
+    if (sendPacketVars.player->out_head != NULL)
+    {
+      sendQueueData(sendPacketVars.buffer, sendPacketVars.bufferindex);
+      sendPacketVars.bufferindex = 0;
+      return;
+    }
+    int blocked = 0;
+    size_t sent = sendData(sendPacketVars.buffer, sendPacketVars.bufferindex, &blocked);
+    if (blocked && sent < sendPacketVars.bufferindex)
+    {
+      sendQueueData(sendPacketVars.buffer + sent, sendPacketVars.bufferindex - sent);
+    }
+    sendPacketVars.bufferindex = 0;
+  }
+}
+void sendFlush(player_t *player)
+{
+  if (player == NULL)
+  {
+    return;
+  }
+  while (player->out_head)
+  {
+    out_packet_t *pkt = player->out_head;
+    if (pkt->sent >= pkt->len)
+    {
+      player->out_head = pkt->next;
+      if (player->out_head == NULL)
+      {
+        player->out_tail = NULL;
+      }
+      U_free(pkt->data);
+      U_free(pkt);
+      continue;
+    }
+    size_t remaining = pkt->len - pkt->sent;
+    size_t blockSize = remaining < MAX_SEND_FRAGMENT_SIZE ? remaining : MAX_SEND_FRAGMENT_SIZE;
+    ssize_t r = U_send(player->fd, (char *)pkt->data + pkt->sent, blockSize, MSG_NOSIGNAL);
+    if (r < 0)
+    {
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
+      {
+        return;
+      }
+      printl(LOG_ERROR, "could not send (%d) code %ld (%p %ld)\n", player->fd, r, pkt->data, pkt->sent);
+      printl(LOG_ERROR, "errno: %s\n", strerror(errno));
+      player->remove_player_event = 1;
+      return;
+    }
+    if (r == 0)
+    {
+      printl(LOG_ERROR, "could not send (%d) code %ld (%p %ld)\n", player->fd, r, pkt->data, pkt->sent);
+      player->remove_player_event = 1;
+      return;
+    }
+    pkt->sent += (size_t)r;
+    if (pkt->sent == pkt->len)
+    {
+      player->out_head = pkt->next;
+      if (player->out_head == NULL)
+      {
+        player->out_tail = NULL;
+      }
+      U_free(pkt->data);
+      U_free(pkt);
+    }
   }
 }
 uint8_t sendAllowed() { return 1; }
