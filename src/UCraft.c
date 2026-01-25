@@ -249,11 +249,7 @@ static void s2cHandler()
                     PlayS2Centitydata(p, PLAYER_SKIN_PARTS_FLAGS, ENTITY_DATA_BYTE, p->skin_parts); // enable from cape to hat
                 }
             }
-            // set the minimum chunk coordinates
-            currentPlayer->chunk_x = -CHUNK_SIZE;
-            currentPlayer->chunk_z = -CHUNK_SIZE;
-
-            currentPlayer->chunk_next_event = 1;
+            gamePlayerSpawned(currentPlayer);
             currentPlayer->logged_on = 1;
             currentPlayer->spawn_event = 0;
         }
@@ -261,6 +257,8 @@ static void s2cHandler()
         {
             ConfigurationS2Cregistry();
             ConfigurationS2Cready();
+            currentPlayer->global_buffer_start_index = sendGetGlobalBufferIndex();
+            currentPlayer->ingame = 1;
             currentPlayer->configuration_known_packs_ack_event = 0;
         }
         if (currentPlayer->configuration_event)
@@ -268,31 +266,6 @@ static void s2cHandler()
             ConfigurationS2Cfeatures();
             ConfigurationS2Cknownpacks();
             currentPlayer->configuration_event = 0;
-        }
-        if (currentPlayer->chunk_next_event)
-        {
-            // dont send multiple chunks at the same time since the client will reject it
-            // TODO: add compression
-            PlayS2Cchunk(currentPlayer, currentPlayer->chunk_x, currentPlayer->chunk_z);
-            if (currentPlayer->chunk_x < CHUNK_SIZE)
-            {
-                currentPlayer->chunk_x++;
-            }
-            else
-            {
-                currentPlayer->chunk_x = -CHUNK_SIZE;
-                currentPlayer->chunk_z++;
-            }
-            if (currentPlayer->chunk_z > CHUNK_SIZE)
-            {
-                PlayS2Cgameevent(EVENT_WAIT_LEVEL_CHUNKS, 1.0f);
-                currentPlayer->chunk_x = 0;
-                currentPlayer->chunk_z = 0;
-                currentPlayer->global_buffer_start_index = sendGetGlobalBufferIndex();
-                currentPlayer->chunk_next_event = 0;
-                currentPlayer->chunk_loaded_event = 1;
-                currentPlayer->ingame = 1;
-            }
         }
 #ifdef ONLINE_MODE
         if (currentPlayer->encryption_event)
@@ -325,20 +298,6 @@ static void s2cHandler()
                 }
                 PlayS2Cheartbeat(currentPlayer);
                 currentPlayer->heartbeat = 0;
-            }
-            if (currentPlayer->chunk_loaded_event)
-            {
-                PlayS2Cpositionrotation(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
-                PlayS2Ccompassposition(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
-                gameChunkLoaded(currentPlayer);
-                currentPlayer->chunk_loaded_event = 0;
-            }
-            // check if the conditions for a chunk update are met
-            if (currentPlayer->chunk_x != currentPlayer->chunk_px || currentPlayer->chunk_z != currentPlayer->chunk_pz)
-            {
-                PlayS2Cchunkcenter(currentPlayer, currentPlayer->chunk_x, currentPlayer->chunk_z);
-                currentPlayer->chunk_px = currentPlayer->chunk_x;
-                currentPlayer->chunk_pz = currentPlayer->chunk_z;
             }
             if (currentPlayer->teleport)
             {
