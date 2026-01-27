@@ -87,7 +87,7 @@ int32_t readVarInt()
   uint32_t position = 0;
   uint8_t currentByte;
 
-  for (int i = 0; i < 5; i++)
+  for (int i = 0; i < VARINT_MAX; i++)
   {
     currentByte = readByte();
     value |= (currentByte & 0x7F) << position;
@@ -474,6 +474,9 @@ void sendStart()
     }
   }
   sendPacketVars.packetindex = 0;
+  sendPacketVars.packet_prefixed_start = 0;
+  sendPacketVars.packet_prefixed_end = 0;
+  sendPacketVars.packet_prefixed_active = 0;
 }
 void sendByte(uint8_t b)
 {
@@ -514,6 +517,41 @@ void sendByte(uint8_t b)
     sendPacketVars.packetbuffer[sendPacketVars.packetindex++] = b;
   }
 }
+// TODO: Make it handle multiple contexts for the same packet window (from sendStart till sendDone if needed)
+void sendPrefixedStart()
+{
+  if (sendPacketVars.switch_to_localbuffer)
+  {
+    printl(LOG_ERROR, "prefixed segment not supported in local buffer\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    printl(LOG_ERROR, "prefixed segment already active\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  sendPacketVars.packet_prefixed_start = sendPacketVars.packetindex;
+  sendPacketVars.packet_prefixed_active = 1;
+}
+void sendPrefixedEnd()
+{
+  if (sendPacketVars.switch_to_localbuffer)
+  {
+    printl(LOG_ERROR, "prefixed segment not supported in local buffer\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  if (!sendPacketVars.packet_prefixed_active)
+  {
+    printl(LOG_ERROR, "prefixed segment start not set\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  sendPacketVars.packet_prefixed_end = sendPacketVars.packetindex;
+}
+
 void sendPlayPacketHeader(size_t id)
 {
   if (id < S2C_PLAY_MAPPING_LEN)
@@ -596,34 +634,82 @@ void sendRawData(char *dat, size_t len)
     sendExtByte(dat[i]);
   }
 }
+static size_t sendExtVarInt(int32_t v)
+{
+  size_t i;
+  for (i = 0; i < VARINT_MAX; i++)
+  {
+    if ((v & ~0x7F) == 0)
+    {
+      sendExtByte(v);
+      break;
+    }
+
+    sendExtByte((v & 0x7F) | 0x80);
+    v = (uint32_t)v >> 7;
+  }
+  return i;
+}
+static size_t GetVarIntLen(int32_t v)
+{
+  uint32_t u = (uint32_t)v;
+
+  if ((u & ~0x7Fu) == 0)
+    return 1;
+  if ((u & ~0x3FFFu) == 0)
+    return 2;
+  if ((u & ~0x1FFFFFu) == 0)
+    return 3;
+  if ((u & ~0x0FFFFFFFu) == 0)
+    return 4;
+  return 5;
+}
 void sendDone()
 {
   size_t packet_len = sendPacketVars.packetindex;
+  size_t segment_len = 0;
+  size_t segment_len_varint_size = 0;
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    if (sendPacketVars.packet_prefixed_end < sendPacketVars.packet_prefixed_start || sendPacketVars.packet_prefixed_end > sendPacketVars.packetindex)
+    {
+      printl(LOG_ERROR, "prefixed segment range invalid\n");
+      sendPacketVars.player->remove_player_event = 1;
+      sendPacketVars.packet_prefixed_active = 0;
+      return;
+    }
+    segment_len = sendPacketVars.packet_prefixed_end - sendPacketVars.packet_prefixed_start;
+    segment_len_varint_size = GetVarIntLen((int32_t)segment_len);
+    packet_len += segment_len_varint_size;
+  }
   // construct the packet header
   if (sendPacketVars.player->compression_event)
   {
     packet_len++;
   }
-  // construct a varint for the 'Packet Length' field
-  size_t value = packet_len;
-  for (size_t i = 0; i < 4; i++)
-  {
-    if ((value & ~0x7F) == 0)
-    {
-      sendExtByte(value);
-      break;
-    }
-
-    sendExtByte((value & 0x7F) | 0x80);
-    value = (uint32_t)value >> 7;
-  }
+  sendExtVarInt(packet_len);
   // varint for the 'Data Length' field
   if (sendPacketVars.player->compression_event)
   {
     sendExtByte(0);
   }
-  // send the packet
-  sendRawData((char *)sendPacketVars.packetbuffer, sendPacketVars.packetindex);
+  // send the marked buffer with its size
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    // send the data prior to the marker
+    sendRawData((char *)sendPacketVars.packetbuffer, sendPacketVars.packet_prefixed_start);
+    // send the buffer length prefix
+    sendExtVarInt((int32_t)segment_len);
+    // send the marked buffer
+    sendRawData((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_start], segment_len);
+    // send the remaining packet
+    sendRawData((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_end], sendPacketVars.packetindex - sendPacketVars.packet_prefixed_end);
+    sendPacketVars.packet_prefixed_active = 0;
+  }
+  else
+  {
+    sendRawData((char *)sendPacketVars.packetbuffer, sendPacketVars.packetindex);
+  }
   // free uneeded space if its more than MEM_CHUNK_THRESHOLD chunk sizes
   if ((ssize_t)((sendPacketVars.packetsize - sendPacketVars.packetindex) / MEM_CHUNK_SIZE) >= MEM_CHUNK_THRESHOLD)
   {
@@ -644,7 +730,7 @@ void sendDone()
 
 void sendVarInt(int32_t value)
 {
-  for (int i = 0; i < 5; i++)
+  for (int i = 0; i < VARINT_MAX; i++)
   {
     if ((value & ~0x7F) == 0)
     {

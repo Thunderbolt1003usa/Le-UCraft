@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define VARINT_MAX 5
+
 struct readPacketVars_t
 {
   uint8_t buffer[READBUFSIZE];
@@ -28,6 +30,10 @@ struct sendPacketVars_t
   uint8_t *packetbuffer;
   size_t packetsize;
   size_t packetindex;
+  // prefixed
+  size_t packet_prefixed_start;
+  size_t packet_prefixed_end;
+  uint8_t packet_prefixed_active;
   // global buffer for all the clients
   uint8_t switch_to_global_buffer : 1;
   uint8_t *globalbuffer;
@@ -74,6 +80,8 @@ void sendFlush(player_t *player);
 uint8_t sendAllowed();
 void sendStart();
 void sendByte(uint8_t b);
+void sendPrefixedStart();
+void sendPrefixedEnd();
 void sendPlayPacketHeader(size_t id);
 void sendConfigurationPacketHeader(size_t id);
 void sendBuffer(const char *buf, size_t len);
