@@ -29,47 +29,115 @@ void gamePlayerGlobalTick(player_t *currentPlayer)
 // fired when the player is spawned in the local context {fired once}
 void gamePlayerSpawned(player_t *currentPlayer)
 {
-    currentPlayer->gamePlayerData.chunk_x = -CHUNK_SIZE;
-    currentPlayer->gamePlayerData.chunk_z = -CHUNK_SIZE;
-    currentPlayer->gamePlayerData.chunk_next_event = 1;
+    // Local chunk
+    currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+    currentPlayer->gamePlayerData.chunk_lz = -VIEWDISTANCE;
+
+    currentPlayer->gamePlayerData.chunk_spawn_event = 1;
+    currentPlayer->gamePlayerData.chunk_load_event = 1;
 }
 // fired in local context
 void gamePlayerLocalTick(player_t *currentPlayer)
 {
-    if (currentPlayer->gamePlayerData.chunk_next_event)
+    // chunk generation stuff
+    if (currentPlayer->gamePlayerData.chunk_load_event)
     {
-        // dont send multiple chunks at the same time since the client will reject it
-        // TODO: add compression
-        PlayS2Cchunk(currentPlayer, currentPlayer->gamePlayerData.chunk_x, currentPlayer->gamePlayerData.chunk_z);
-        if (currentPlayer->gamePlayerData.chunk_x < CHUNK_SIZE)
+        if (currentPlayer->chunk_px != 0 || currentPlayer->chunk_pz != 0)
         {
-            currentPlayer->gamePlayerData.chunk_x++;
+            // send only the new edge column/row.
+            if (currentPlayer->chunk_px != 0)
+            {
+                int32_t chunk_x = currentPlayer->gamePlayerData.chunk_x + (currentPlayer->chunk_px * VIEWDISTANCE);
+                int32_t chunk_z = currentPlayer->gamePlayerData.chunk_z + currentPlayer->gamePlayerData.chunk_lz;
+                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z);
+                if (currentPlayer->gamePlayerData.chunk_lz < VIEWDISTANCE)
+                {
+                    currentPlayer->gamePlayerData.chunk_lz++;
+                }
+                else
+                {
+                    currentPlayer->gamePlayerData.chunk_lz = -VIEWDISTANCE;
+                    currentPlayer->chunk_px = 0;
+                }
+            }
+            else
+            {
+                int32_t chunk_x = currentPlayer->gamePlayerData.chunk_x + currentPlayer->gamePlayerData.chunk_lx;
+                int32_t chunk_z = currentPlayer->gamePlayerData.chunk_z + (currentPlayer->chunk_pz * VIEWDISTANCE);
+                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z);
+                if (currentPlayer->gamePlayerData.chunk_lx < VIEWDISTANCE)
+                {
+                    currentPlayer->gamePlayerData.chunk_lx++;
+                }
+                else
+                {
+                    currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+                    currentPlayer->chunk_pz = 0;
+                }
+            }
+            if (currentPlayer->chunk_px == 0 && currentPlayer->chunk_pz == 0)
+            {
+                currentPlayer->gamePlayerData.chunk_load_event = 0;
+            }
         }
         else
         {
-            currentPlayer->gamePlayerData.chunk_x = -CHUNK_SIZE;
-            currentPlayer->gamePlayerData.chunk_z++;
+            // full square load
+            PlayS2Cchunk(currentPlayer, currentPlayer->gamePlayerData.chunk_lx + currentPlayer->gamePlayerData.chunk_x, currentPlayer->gamePlayerData.chunk_lz + currentPlayer->gamePlayerData.chunk_z);
+            if (currentPlayer->gamePlayerData.chunk_lx < VIEWDISTANCE)
+            {
+                currentPlayer->gamePlayerData.chunk_lx++;
+            }
+            else
+            {
+                currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+                currentPlayer->gamePlayerData.chunk_lz++;
+            }
+            if (currentPlayer->gamePlayerData.chunk_lz > VIEWDISTANCE)
+            {
+                // close the 'Loading terrain' screen and set the coordinates of the player
+                if (currentPlayer->gamePlayerData.chunk_spawn_event)
+                {
+                    PlayS2Cpositionrotation(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
+                    PlayS2Ccompassposition(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
+                    PlayS2Cgameevent(EVENT_WAIT_LEVEL_CHUNKS, 1.0f);
+                    PlayS2Cchunkcenter(currentPlayer, currentPlayer->gamePlayerData.chunk_x, currentPlayer->gamePlayerData.chunk_z);
+
+                    currentPlayer->gamePlayerData.chunk_spawn_event = 0;
+                }
+                currentPlayer->gamePlayerData.chunk_load_event = 0;
+            }
         }
-        if (currentPlayer->gamePlayerData.chunk_z > CHUNK_SIZE)
+    }
+    else
+    {
+        // check if the conditions for a chunk update are met
+        int32_t dx = currentPlayer->chunk_x - currentPlayer->gamePlayerData.chunk_x;
+        int32_t dz = currentPlayer->chunk_z - currentPlayer->gamePlayerData.chunk_z;
+
+        if (dx != 0 || dz != 0)
         {
-            PlayS2Cgameevent(EVENT_WAIT_LEVEL_CHUNKS, 1.0f);
-            currentPlayer->gamePlayerData.chunk_x = 0;
-            currentPlayer->gamePlayerData.chunk_z = 0;
-            currentPlayer->gamePlayerData.chunk_next_event = 0;
-            currentPlayer->gamePlayerData.chunk_loaded_event = 1;
+            PlayS2Cchunkcenter(currentPlayer, currentPlayer->chunk_x, currentPlayer->chunk_z);
+            currentPlayer->gamePlayerData.chunk_x = currentPlayer->chunk_x;
+            currentPlayer->gamePlayerData.chunk_z = currentPlayer->chunk_z;
+            currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+            currentPlayer->gamePlayerData.chunk_lz = -VIEWDISTANCE;
+
+            if (dx > 1 || dx < -1 || dz > 1 || dz < -1)
+            {
+                // moved too far
+                currentPlayer->chunk_px = 0;
+                currentPlayer->chunk_pz = 0;
+            }
+            else
+            {
+                // moved one chunk: load only the new border(s)
+                currentPlayer->chunk_px = (dx > 0) ? 1 : (dx < 0) ? -1
+                                                                  : 0;
+                currentPlayer->chunk_pz = (dz > 0) ? 1 : (dz < 0) ? -1
+                                                                  : 0;
+            }
+            currentPlayer->gamePlayerData.chunk_load_event = 1;
         }
-    }
-    if (currentPlayer->gamePlayerData.chunk_loaded_event)
-    {
-        PlayS2Cpositionrotation(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
-        PlayS2Ccompassposition(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
-        currentPlayer->gamePlayerData.chunk_loaded_event = 0;
-    }
-    // check if the conditions for a chunk update are met
-    if (currentPlayer->gamePlayerData.chunk_x != currentPlayer->gamePlayerData.chunk_px || currentPlayer->gamePlayerData.chunk_z != currentPlayer->gamePlayerData.chunk_pz)
-    {
-        PlayS2Cchunkcenter(currentPlayer, currentPlayer->gamePlayerData.chunk_x, currentPlayer->gamePlayerData.chunk_z);
-        currentPlayer->gamePlayerData.chunk_px = currentPlayer->gamePlayerData.chunk_x;
-        currentPlayer->gamePlayerData.chunk_pz = currentPlayer->gamePlayerData.chunk_z;
     }
 }

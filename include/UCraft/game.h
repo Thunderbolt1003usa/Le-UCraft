@@ -9,10 +9,10 @@ typedef struct player_t player_t;
 struct gamePlayerData_t
 {
     // Events
-    uint8_t chunk_loaded_event : 1;
-    uint8_t chunk_next_event : 1;
+    uint8_t chunk_load_event : 1;
+    uint8_t chunk_spawn_event : 1;
     // Chunk
-    int32_t chunk_x, chunk_z, chunk_px, chunk_pz;
+    int32_t chunk_x, chunk_z, chunk_lx, chunk_lz;
 };
 typedef struct gamePlayerData_t gamePlayerData_t;
 

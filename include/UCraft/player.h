@@ -99,7 +99,6 @@ struct player_t
   uint8_t ability;
   size_t global_buffer_start_index;
   size_t global_buffer_end_index;
-  size_t loaded_chunks;
   // Game
   gamePlayerData_t gamePlayerData;
   // Private

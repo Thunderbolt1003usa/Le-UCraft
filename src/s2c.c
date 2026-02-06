@@ -230,9 +230,9 @@ void PlayS2Cspawnentity(player_t *currentPlayer, EntityMetadataType type)
 {
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_ADD_ENTITY);
-  sendVarInt(currentPlayer->id); //EID
-  sendUUID(currentPlayer->id); //UUID
-  sendVarInt(type); //Entity Type
+  sendVarInt(currentPlayer->id); // EID
+  sendUUID(currentPlayer->id);   // UUID
+  sendVarInt(type);              // Entity Type
   sendDouble(0);
   sendDouble(0);
   sendDouble(0);
@@ -272,19 +272,13 @@ void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z)
 {
   // Thanks to bixilon(https://gitlab.bixilon.de/) for this minimal chunk
   // generation!
-  char block_entity[256];
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_LEVEL_CHUNK_WITH_LIGHT);
   sendInt(x);
   sendInt(z);
   sendVarInt(0); // Heightmap count
-  // switch to another buffer so the size can be appended later on
-  sendSwitchToLocalBuffer(block_entity, sizeof(block_entity));
-  // this part of the chunk depends on the height and logical_height from the
-  // codec since section = logical_height/16 BUT for logical_height > 64
-  // something changes and the client expects the value to be <= 32 hence the
-  // chosen value
-  for (int i = 0; i < 32; i++)
+  sendPrefixedStart();
+  for (int i = 0; i < 24; i++)
   {
     sendShort(0);  // block count
     sendByte(0);   // blocks singular
@@ -296,9 +290,7 @@ void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z)
   sendByte(0);
   sendByte(0);
   sendVarInt(0);
-  size_t len = sendRevertFromLocalBuffer();
-  sendVarInt(len);
-  sendBuffer(block_entity, len);
+  sendPrefixedEnd();
   sendVarInt(0); // block entiies
   for (int i = 0; i < 4; i++)
   { // Sky Light Mask,...
@@ -466,7 +458,7 @@ void PlayS2Ccompassposition(player_t *currentPlayer, int32_t x, int32_t y, int32
 {
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_SET_DEFAULT_SPAWN_POSITION);
-  sendString("overworld",-1);
+  sendString("overworld", -1);
   sendPosition(x, y, z);
   sendFloat(0);
   sendFloat(0);
@@ -651,7 +643,6 @@ void ConfigurationS2Cregistry()
   sendString("angry", -1);
   sendByte(0);
   sendDone();
-
 }
 void ConfigurationS2Cready()
 {
