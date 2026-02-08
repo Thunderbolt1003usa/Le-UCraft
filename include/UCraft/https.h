@@ -13,6 +13,8 @@ struct httpsData_t
     size_t timeout; // timeout in ticks
     size_t len;
     size_t offset;
+
+    uint8_t connection_closed : 1;
     char buffer[2048];
 };
 typedef struct httpsData_t httpsData_t;

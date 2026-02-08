@@ -14,13 +14,36 @@
 #include "mbedtls/debug.h"
 #include "lwjson/lwjson.h"
 #include "wrapper.h"
+
 static httpsData_t httpsData;
+static struct sockaddr_in auth_server;
+
+
 #ifdef MBEDTLS_DEBUG_C
 static void sslDebug(void *ctx, int level, const char *file, int line, const char *str)
 {
     printl(LOG_INFO, "%s:%04d: %s", file, line, str);
 }
 #endif /*MBEDTLS_DEBUG_C*/
+
+static void httpsClose()
+{
+    if (httpsData.connection_closed)
+    {
+        return;
+    }
+
+    int ret;
+    do
+    {
+        ret = mbedtls_ssl_close_notify(&httpsData.ssl);
+    } while (ret == MBEDTLS_ERR_SSL_WANT_WRITE);
+    U_shutdown(httpsData.net.fd, SHUT_RDWR);
+    U_close(httpsData.net.fd);
+    mbedtls_ssl_free(&httpsData.ssl);
+    mbedtls_ssl_config_free(&httpsData.conf);
+    httpsData.connection_closed = 1;
+}
 // TODO: Add checks if the socket is nonblocking or not as the implementation for net_would_block is missing
 int mbedtls_net_recv(void *ctx, unsigned char *buf, size_t len)
 {
@@ -68,6 +91,7 @@ httpsData_t *httpsGetData()
 {
     return &httpsData;
 }
+
 int httpsConnect(player_t *currentPlayer, const char *hostname, const char *port)
 {
     if (currentPlayer == NULL)
@@ -97,17 +121,20 @@ int httpsConnect(player_t *currentPlayer, const char *hostname, const char *port
         printl(LOG_ERROR, "U_setsocknonblock returned %d\n", ret);
         return 1;
     }
-    struct sockaddr_in server;
-    server.sin_family = AF_INET;
-    server.sin_port = htons(atoi(port));
-    struct hostent *hostinfo = U_gethostbyname(hostname);
-    if (!hostinfo)
+
+    auth_server.sin_family = AF_INET;
+    auth_server.sin_port = htons(atoi(port));
+    if (auth_server.sin_addr.s_addr == 0)
     {
-        printl(LOG_ERROR, "U_gethostbyname Failed\r\n");
-        return 1;
+        struct hostent *hostinfo = U_gethostbyname(hostname);
+        if (!hostinfo)
+        {
+            printl(LOG_ERROR, "U_gethostbyname Failed\r\n");
+            return 1;
+        }
+        auth_server.sin_addr = *((struct in_addr *)hostinfo->h_addr);
     }
-    server.sin_addr = *((struct in_addr *)hostinfo->h_addr);
-    ret = U_connect(httpsData.net.fd, (struct sockaddr *)&server, sizeof(server));
+    ret = U_connect(httpsData.net.fd, (struct sockaddr *)&auth_server, sizeof(auth_server));
     if (ret != 0 && errno != 0 && errno != EINPROGRESS)
     {
         printl(LOG_ERROR, "U_connect returned %d errno: %s\n", ret, strerror(errno));
@@ -234,6 +261,8 @@ int httpsRtr(player_t *currentPlayer)
     {
         return 1;
     }
+    // close the connection as we dont need it anymore but keep the data for processing
+    httpsClose();
     // check for HTTP 204
     if (strstr(httpsData.buffer, "204 No Content\r\n"))
     {
@@ -467,21 +496,13 @@ void httpsFreePlayer(player_t *currentPlayer)
         return;
     }
     // send SSL/TLS closure notification
-    int ret = 0;
-    do
-    {
-        ret = mbedtls_ssl_close_notify(&httpsData.ssl);
-    } while (ret == MBEDTLS_ERR_SSL_WANT_WRITE);
-    U_close(httpsData.net.fd);
-    mbedtls_ssl_free(&httpsData.ssl);
-    mbedtls_ssl_config_free(&httpsData.conf);
+    httpsClose();
     memset(&httpsData, 0, sizeof(httpsData_t));
     httpsData.currentPlayer = NULL;
 }
 void httpsCleanup()
 {
-    mbedtls_ssl_free(&httpsData.ssl);
-    mbedtls_ssl_config_free(&httpsData.conf);
+    httpsClose();
     memset(&httpsData, 0, sizeof(httpsData_t));
     httpsData.currentPlayer = NULL;
 }
