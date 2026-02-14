@@ -19,6 +19,7 @@
 #define GAMEMODE 1   // 0: Survival, 1: Creative, 2: Adventure, 3: Spectator.
 #define DIFFICULTY 2 //	0: peaceful, 1: easy, 2: normal, 3: hard
 #define VIEWDISTANCE 2
+#define WORLD_SEED 67
 #define RESPAWNSCREEN 1
 
 #define CLIENT_VERSION "1.21.10"

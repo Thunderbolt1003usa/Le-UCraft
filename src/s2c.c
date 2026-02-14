@@ -7,11 +7,10 @@
 #include "encryption.h"
 #include "wrapper.h"
 #include "util.h"
+
 #ifdef ONLINE_MODE
 #include "mbedtls/base64.h"
 #endif /*ONLINE_MODE*/
-
-extern int main_tick;
 
 // Status packets
 void StatusS2Cresponse(player_t *currentPlayer)
@@ -268,7 +267,7 @@ void PlayS2Cchunkcenter(player_t *currentPlayer, int32_t x, int32_t z)
   sendVarInt(z);
   sendDone();
 }
-void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z)
+void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, int32_t to)
 {
   // Thanks to bixilon(https://gitlab.bixilon.de/) for this minimal chunk
   // generation!
@@ -278,18 +277,7 @@ void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z)
   sendInt(z);
   sendVarInt(0); // Heightmap count
   sendPrefixedStart();
-  for (int i = 0; i < 24; i++)
-  {
-    sendShort(0);  // block count
-    sendByte(0);   // blocks singular
-    sendByte(0);   // block id
-    sendByte(0);   // biome singular
-    sendVarInt(0); // biome id
-  }
-  sendByte(0);
-  sendByte(0);
-  sendByte(0);
-  sendVarInt(0);
+  worldGenerateChunk(currentPlayer, x, z, from, to);
   sendPrefixedEnd();
   sendVarInt(0); // block entiies
   for (int i = 0; i < 4; i++)
@@ -303,6 +291,7 @@ void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z)
 }
 void PlayS2Cheartbeat(player_t *currentPlayer)
 {
+  extern size_t main_tick;
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_KEEP_ALIVE);
   sendLong(main_tick);

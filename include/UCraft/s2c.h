@@ -3,6 +3,7 @@
 #include "socketio.h"
 #include "enums.h"
 #include "blocks/blocks.h"
+#include "world.h"
 
 typedef enum S2CPlayPacketId
 {
@@ -190,7 +191,7 @@ void PlayS2Cspawnentity(player_t *currentPlayer, EntityMetadataType type);
 void PlayS2Cpositionrotation(player_t *currentPlayer, double x, double y,
                              double z);
 void PlayS2Cchunkcenter(player_t *currentPlayer, int32_t x, int32_t z);
-void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z);
+void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, int32_t to);
 void PlayS2Cheartbeat(player_t *currentPlayer);
 void PlayS2Crotation(player_t *currentPlayer);
 void PlayS2Cteleport(player_t *currentPlayer, double x, double y, double z);
