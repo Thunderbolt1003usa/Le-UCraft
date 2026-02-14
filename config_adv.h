@@ -4,11 +4,10 @@
 #define ENDIAN 1 // 1: little, 0:big
 
 #define TICK_TIME_MS 10
-#define MEM_CHUNK_SIZE 512    // Allocation granularity
-#define MEM_CHUNK_THRESHOLD 4 // Number of chunks to allocate before reallocating
+#define MEM_CHUNK_SIZE 256    // Allocation granularity
+#define MEM_CHUNK_THRESHOLD 2 // Number of chunks to allocate before reallocating
 
-#define MAX_SEND_FRAGMENT_SIZE 1024 // Number of bytes to send on the wire each call
-#define SEND_PACKET_TIMEOUT 400     // Number of ticks before timing out
+#define MAX_SEND_FRAGMENT_SIZE 2048 // Number of bytes to send on the wire each call
 #define MAX_STRING_SIZE 1024
 #define LOG_BUFFER_SIZE 1024
 #define READBUFSIZE 4096
