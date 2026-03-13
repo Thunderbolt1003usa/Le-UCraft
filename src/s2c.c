@@ -96,7 +96,7 @@ void LoginS2Ccompression(player_t *currentPlayer)
   sendByte(0x3);
   sendVarInt(COMPRESSION_THRESHOLD);
   sendDone();
-  currentPlayer->compression_event = 1;
+  currentPlayer->compression_flag = 1;
 }
 void LoginS2Csuccess(player_t *currentPlayer)
 {

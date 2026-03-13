@@ -33,17 +33,18 @@ struct sendPacketVars_t
   // prefixed
   size_t packet_prefixed_start;
   size_t packet_prefixed_end;
-  uint8_t packet_prefixed_active;
   // global buffer for all the clients
-  uint8_t switch_to_global_buffer : 1;
   uint8_t *globalbuffer;
   size_t globalbuffersize;
   size_t globalbufferindex;
   // local buffer
-  uint8_t switch_to_localbuffer : 1;
   char *localbuffer;
   size_t localbuffersize;
   size_t localbufferindex;
+  // Flags
+  uint8_t packet_prefixed_active : 1;
+  uint8_t global_buffer_active : 1;
+  uint8_t localbuffer_active : 1;
   // player object
   player_t *player;
 };
@@ -74,7 +75,6 @@ void sendGlobalBuffer(player_t *player);
 // writing utils, one player context only.
 size_t sendData(uint8_t *data, size_t packetsize, int *blocked);
 void sendStartPlayer(player_t *player);
-void sendMainByte(uint8_t byte);
 void sendDispatch();
 void sendFlush(player_t *player);
 uint8_t sendAllowed();
@@ -91,7 +91,6 @@ void sendLong(int64_t v);
 void sendDouble(double v);
 void sendFloat(float v);
 void sendDone();
-void sendRawData(char *dat, size_t len);
 void sendVarInt(int32_t value);
 void sendPosition(int32_t x, int32_t y, int32_t z);
 void sendString(const char *str, size_t len);

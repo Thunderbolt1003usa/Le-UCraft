@@ -37,12 +37,12 @@ static void c2sHandler(readPacketVars_t *readPacketValue)
             currentPlayer->remove_player_event = 1;
             return;
         }
-        if (currentPlayer->compression_event)
+        if (currentPlayer->compression_flag)
         {
             uint8_t compsize = readVarInt();
             if (compsize > 0)
             {
-                printl(LOG_WARN, "UNIMPLEMENTED compressed packet size:%d\n", compsize);
+                printl(LOG_WARN, "UNIMPLEMENTED inbound compressed packet size:%d\n", compsize);
                 if (readPacketValue->pktbytes)
                 {
                     while (readPacketValue->pktbytes)

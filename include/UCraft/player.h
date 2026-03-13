@@ -65,7 +65,7 @@ struct player_t
   uint8_t login_event : 1;
   uint8_t spawn_event : 1;
   uint8_t playerlist_event : 1;
-  uint8_t compression_event : 1;
+  uint8_t compression_flag : 1;
   uint8_t remove_player_event : 1;
   uint8_t configuration_event : 1;
   uint8_t configuration_known_packs_ack_event : 1;

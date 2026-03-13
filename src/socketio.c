@@ -152,31 +152,50 @@ void sendSwitchToGlobalBuffer()
       return;
     }
   }
-  sendPacketVars.switch_to_global_buffer = 1;
+  sendPacketVars.global_buffer_active = 1;
 }
 void sendRevertFromGlobalBuffer()
 {
-  sendPacketVars.switch_to_global_buffer = 0;
+  sendPacketVars.global_buffer_active = 0;
 }
 
 void sendSwitchToLocalBuffer(char *buf, size_t maxlen)
 {
   sendPacketVars.localbuffer = buf;
   sendPacketVars.localbuffersize = maxlen;
-  sendPacketVars.switch_to_localbuffer = 1;
+  sendPacketVars.localbuffer_active = 1;
 }
 size_t sendRevertFromLocalBuffer()
 {
   size_t len = sendPacketVars.localbufferindex;
   sendPacketVars.localbuffer = 0;
   sendPacketVars.localbuffersize = 0;
-  sendPacketVars.switch_to_localbuffer = 0;
+  sendPacketVars.localbuffer_active = 0;
   sendPacketVars.localbufferindex = 0;
   return len;
 }
-void sendExtByte(uint8_t b)
+static void send_main_byte(uint8_t byte)
 {
-  if (sendPacketVars.switch_to_global_buffer)
+  if (sendPacketVars.bufferindex >= sendPacketVars.buffersize)
+  {
+    uint8_t *buffer = NULL;
+    // allocate the required memory
+    sendPacketVars.buffersize += MEM_CHUNK_SIZE;
+    buffer = U_realloc(sendPacketVars.buffer, sendPacketVars.buffersize);
+    if (buffer == NULL)
+    {
+      printl(LOG_ERROR, "memory allocation failed buffer!\n");
+      sendPacketVars.player->remove_player_event = 1;
+      return;
+    }
+    // printl(LOG_INFO,"Buffer size: %ld\n", sendPacketVars.buffersize);
+    sendPacketVars.buffer = buffer;
+  }
+  sendPacketVars.buffer[sendPacketVars.bufferindex++] = byte;
+}
+static void send_raw_byte(uint8_t b)
+{
+  if (sendPacketVars.global_buffer_active)
   {
     if (sendPacketVars.globalbufferindex >= sendPacketVars.globalbuffersize)
     {
@@ -197,7 +216,7 @@ void sendExtByte(uint8_t b)
   }
   else
   {
-    sendMainByte(b);
+    send_main_byte(b);
   }
 }
 
@@ -235,13 +254,13 @@ void sendGlobalBuffer(player_t *player)
   {
     for (size_t i = 0; i < player->global_buffer_start_index; i++)
     {
-      sendMainByte(sendPacketVars.globalbuffer[i]);
+      send_main_byte(sendPacketVars.globalbuffer[i]);
     }
   }
   // send bytes from the end till the global buffer end
   for (size_t i = player->global_buffer_end_index; i < sendGetGlobalBufferIndex(); i++)
   {
-    sendMainByte(sendPacketVars.globalbuffer[i]);
+    send_main_byte(sendPacketVars.globalbuffer[i]);
   }
 }
 size_t sendData(uint8_t *data, size_t buffersize, int *blocked)
@@ -315,25 +334,7 @@ void sendStartPlayer(player_t *player)
     sendPacketVars.buffersize = sendPacketVars.bufferindex + 1;
   }
 }
-void sendMainByte(uint8_t byte)
-{
-  if (sendPacketVars.bufferindex >= sendPacketVars.buffersize)
-  {
-    uint8_t *buffer = NULL;
-    // allocate the required memory
-    sendPacketVars.buffersize += MEM_CHUNK_SIZE;
-    buffer = U_realloc(sendPacketVars.buffer, sendPacketVars.buffersize);
-    if (buffer == NULL)
-    {
-      printl(LOG_ERROR, "memory allocation failed buffer!\n");
-      sendPacketVars.player->remove_player_event = 1;
-      return;
-    }
-    // printl(LOG_INFO,"Buffer size: %ld\n", sendPacketVars.buffersize);
-    sendPacketVars.buffer = buffer;
-  }
-  sendPacketVars.buffer[sendPacketVars.bufferindex++] = byte;
-}
+
 static void sendQueueData(const uint8_t *data, size_t len)
 {
   if (len == 0)
@@ -481,7 +482,7 @@ void sendStart()
 void sendByte(uint8_t b)
 {
 
-  if (sendPacketVars.switch_to_localbuffer)
+  if (sendPacketVars.localbuffer_active)
   {
     if (sendPacketVars.localbufferindex >= sendPacketVars.localbuffersize)
     {
@@ -520,7 +521,7 @@ void sendByte(uint8_t b)
 // TODO: Make it handle multiple contexts for the same packet window (from sendStart till sendDone if needed)
 void sendPrefixedStart()
 {
-  if (sendPacketVars.switch_to_localbuffer)
+  if (sendPacketVars.localbuffer_active)
   {
     printl(LOG_ERROR, "prefixed segment not supported in local buffer\n");
     sendPacketVars.player->remove_player_event = 1;
@@ -537,7 +538,7 @@ void sendPrefixedStart()
 }
 void sendPrefixedEnd()
 {
-  if (sendPacketVars.switch_to_localbuffer)
+  if (sendPacketVars.localbuffer_active)
   {
     printl(LOG_ERROR, "prefixed segment not supported in local buffer\n");
     sendPacketVars.player->remove_player_event = 1;
@@ -627,30 +628,30 @@ void sendFloat(float v)
 #endif
   sendBuffer((char *)&c, sizeof(uint32_t));
 }
-void sendRawData(char *dat, size_t len)
+static void send_raw_data(char *dat, size_t len)
 {
   for (size_t i = 0; i < len; i++)
   {
-    sendExtByte(dat[i]);
+    send_raw_byte(dat[i]);
   }
 }
-static size_t sendExtVarInt(int32_t v)
+static size_t send_raw_varint(int32_t v)
 {
   size_t i;
   for (i = 0; i < VARINT_MAX; i++)
   {
     if ((v & ~0x7F) == 0)
     {
-      sendExtByte(v);
+      send_raw_byte(v);
       break;
     }
 
-    sendExtByte((v & 0x7F) | 0x80);
+    send_raw_byte((v & 0x7F) | 0x80);
     v = (uint32_t)v >> 7;
   }
   return i;
 }
-static size_t GetVarIntLen(int32_t v)
+static size_t get_varint_len(int32_t v)
 {
   uint32_t u = (uint32_t)v;
 
@@ -679,36 +680,36 @@ void sendDone()
       return;
     }
     segment_len = sendPacketVars.packet_prefixed_end - sendPacketVars.packet_prefixed_start;
-    segment_len_varint_size = GetVarIntLen((int32_t)segment_len);
+    segment_len_varint_size = get_varint_len((int32_t)segment_len);
     packet_len += segment_len_varint_size;
   }
   // construct the packet header
-  if (sendPacketVars.player->compression_event)
+  if (sendPacketVars.player->compression_flag)
   {
     packet_len++;
   }
-  sendExtVarInt(packet_len);
+  send_raw_varint(packet_len);
   // varint for the 'Data Length' field
-  if (sendPacketVars.player->compression_event)
+  if (sendPacketVars.player->compression_flag)
   {
-    sendExtByte(0);
+    send_raw_varint(0);
   }
   // send the marked buffer with its size
   if (sendPacketVars.packet_prefixed_active)
   {
     // send the data prior to the marker
-    sendRawData((char *)sendPacketVars.packetbuffer, sendPacketVars.packet_prefixed_start);
+    send_raw_data((char *)sendPacketVars.packetbuffer, sendPacketVars.packet_prefixed_start);
     // send the buffer length prefix
-    sendExtVarInt((int32_t)segment_len);
+    send_raw_varint((int32_t)segment_len);
     // send the marked buffer
-    sendRawData((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_start], segment_len);
+    send_raw_data((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_start], segment_len);
     // send the remaining packet
-    sendRawData((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_end], sendPacketVars.packetindex - sendPacketVars.packet_prefixed_end);
+    send_raw_data((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_end], sendPacketVars.packetindex - sendPacketVars.packet_prefixed_end);
     sendPacketVars.packet_prefixed_active = 0;
   }
   else
   {
-    sendRawData((char *)sendPacketVars.packetbuffer, sendPacketVars.packetindex);
+    send_raw_data((char *)sendPacketVars.packetbuffer, sendPacketVars.packetindex);
   }
   // free uneeded space if its more than MEM_CHUNK_THRESHOLD chunk sizes
   if ((ssize_t)((sendPacketVars.packetsize - sendPacketVars.packetindex) / MEM_CHUNK_SIZE) >= MEM_CHUNK_THRESHOLD)
