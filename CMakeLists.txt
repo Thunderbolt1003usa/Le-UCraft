@@ -6,6 +6,7 @@ project(UCraft)
 
 include(${CMAKE_SOURCE_DIR}/3rdparty/cmake/mbedtls/mbedtls.cmake)
 include(${CMAKE_SOURCE_DIR}/3rdparty/cmake/lwjson/lwjson.cmake)
+include(${CMAKE_SOURCE_DIR}/3rdparty/cmake/zlib/zlib.cmake)
 
 
 set(CMAKE_C_STANDARD 11)

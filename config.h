@@ -6,8 +6,8 @@
 
 #define MAX_PLAYERS 20
 
-// #define COMPRESSION
-#define COMPRESSION_THRESHOLD 500
+#define COMPRESSION
+#define COMPRESSION_THRESHOLD 2048
 
 #define ONLINE_MODE
 #define ONLINE_MODE_AUTH // Requires ONLINE_MODE which authticates to mojang servers.

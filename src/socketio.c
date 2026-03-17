@@ -4,6 +4,9 @@
 #include "socketio.h"
 #include "log.h"
 #include "util.h"
+#ifdef COMPRESSION
+#include "zlib.h"
+#endif
 
 static readPacketVars_t readPacketVars = {.pktbytes = -1};
 
@@ -665,11 +668,11 @@ static size_t get_varint_len(int32_t v)
     return 4;
   return 5;
 }
-void sendDone()
+
+static void send_uncompressed()
 {
   size_t packet_len = sendPacketVars.packetindex;
   size_t segment_len = 0;
-  size_t segment_len_varint_size = 0;
   if (sendPacketVars.packet_prefixed_active)
   {
     if (sendPacketVars.packet_prefixed_end < sendPacketVars.packet_prefixed_start || sendPacketVars.packet_prefixed_end > sendPacketVars.packetindex)
@@ -680,8 +683,7 @@ void sendDone()
       return;
     }
     segment_len = sendPacketVars.packet_prefixed_end - sendPacketVars.packet_prefixed_start;
-    segment_len_varint_size = get_varint_len((int32_t)segment_len);
-    packet_len += segment_len_varint_size;
+    packet_len += get_varint_len((int32_t)segment_len);
   }
   // construct the packet header
   if (sendPacketVars.player->compression_flag)
@@ -711,6 +713,183 @@ void sendDone()
   {
     send_raw_data((char *)sendPacketVars.packetbuffer, sendPacketVars.packetindex);
   }
+}
+#ifdef COMPRESSION
+
+static size_t varint_buffer(unsigned char buffer[5], int32_t v)
+{
+  if (buffer == NULL)
+  {
+    return 0;
+  }
+  size_t i;
+  for (i = 0; i < VARINT_MAX; i++)
+  {
+    if ((v & ~0x7F) == 0)
+    {
+      *buffer++ = (unsigned char)v;
+      return i + 1;
+    }
+    *buffer++ = (unsigned char)((v & 0x7F) | 0x80);
+    v = (uint32_t)v >> 7;
+  }
+  return VARINT_MAX;
+}
+
+static void *my_zalloc(void *opaque, uInt items, uInt size)
+{
+  (void)opaque;
+  return U_calloc(items, size);
+}
+
+static void my_zfree(void *opaque, voidpf address)
+{
+  (void)opaque;
+  U_free(address);
+}
+
+static int push_raw_compressed(z_streamp strm, unsigned char *data, size_t size, int flag)
+{
+  unsigned char buffer[512];
+  int rc;
+  strm->next_in = data;
+  strm->avail_in = size;
+  strm->next_out = buffer;
+  strm->avail_out = sizeof(buffer);
+  for (;;)
+  {
+    rc = deflate(strm, flag);
+    if (sizeof(buffer) - strm->avail_out > 0)
+    {
+      send_raw_data((char *)buffer, sizeof(buffer) - strm->avail_out);
+    }
+
+    if (rc == Z_STREAM_END)
+    {
+      return Z_OK;
+    }
+    if ((rc != Z_OK) && (rc != Z_BUF_ERROR))
+    {
+      return rc;
+    }
+
+    if (strm->avail_out == 0)
+    {
+      strm->next_out = buffer;
+      strm->avail_out = sizeof(buffer);
+      continue;
+    }
+
+    if (flag == Z_FINISH)
+    {
+      if (rc == Z_BUF_ERROR)
+      {
+        return rc;
+      }
+      strm->next_out = buffer;
+      strm->avail_out = sizeof(buffer);
+      continue;
+    }
+
+    if (strm->avail_in == 0)
+    {
+      return Z_OK;
+    }
+  }
+  return Z_OK;
+}
+
+static void send_compressed()
+{
+  int rc;
+  unsigned char value[5];
+  unsigned char *pkt = NULL;
+  z_stream strm;
+  size_t data_len = sendPacketVars.packetindex;
+  size_t segment_len = 0;
+  size_t data_len_varint_len;
+  size_t len;
+
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    if (sendPacketVars.packet_prefixed_end < sendPacketVars.packet_prefixed_start || sendPacketVars.packet_prefixed_end > sendPacketVars.packetindex)
+    {
+      printl(LOG_ERROR, "prefixed segment range invalid\n");
+      sendPacketVars.player->remove_player_event = 1;
+      sendPacketVars.packet_prefixed_active = 0;
+      return;
+    }
+    segment_len = sendPacketVars.packet_prefixed_end - sendPacketVars.packet_prefixed_start;
+    data_len += get_varint_len((int32_t)segment_len);
+  }
+  data_len_varint_len = get_varint_len((int32_t)data_len);
+  memset(&strm, 0, sizeof(strm));
+  strm.zalloc = my_zalloc;
+  strm.zfree = my_zfree;
+  strm.opaque = Z_NULL;
+  // windowBits=9, memLevel=1, 9KB
+  // 5968+(4×512)+ (256×2)+ (128×4) = 9040 bytes
+  rc = deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 9, 1, Z_DEFAULT_STRATEGY);
+  if (rc != Z_OK)
+  {
+    printl(LOG_ERROR, "failed to init deflate rc: %d\n", rc);
+    sendPacketVars.player->remove_player_event = 1;
+    sendPacketVars.packet_prefixed_active = 0;
+    return;
+  }
+  send_raw_varint(-2147483648);       // Packet Length, encode 5 bytes and populate it later
+  send_raw_varint((int32_t)data_len); // Data length
+  // send the marked buffer with its size
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    // send the data prior to the marker
+    push_raw_compressed(&strm, sendPacketVars.packetbuffer, sendPacketVars.packet_prefixed_start, Z_SYNC_FLUSH);
+    // send the buffer length prefix
+    len = varint_buffer(value, (int32_t)segment_len);
+    push_raw_compressed(&strm, value, len, Z_SYNC_FLUSH);
+    // send the marked buffer
+    push_raw_compressed(&strm, (unsigned char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_start], segment_len, Z_SYNC_FLUSH);
+    // send the remaining packet
+    push_raw_compressed(&strm, (unsigned char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_end], sendPacketVars.packetindex - sendPacketVars.packet_prefixed_end, Z_SYNC_FLUSH);
+    sendPacketVars.packet_prefixed_active = 0;
+  }
+  else
+  {
+    push_raw_compressed(&strm, sendPacketVars.packetbuffer, data_len, Z_SYNC_FLUSH);
+  }
+  push_raw_compressed(&strm, Z_NULL, 0, Z_FINISH);
+  deflateEnd(&strm);
+  // i am not a fan of this but this is the only way i know to populate the actual size
+  if (sendPacketVars.global_buffer_active)
+  {
+    pkt = &sendPacketVars.globalbuffer[sendPacketVars.globalbufferindex] - strm.total_out - data_len_varint_len - VARINT_MAX;
+    len = varint_buffer(pkt, (int32_t)(data_len_varint_len + strm.total_out));
+    memmove(pkt + len, pkt + VARINT_MAX, strm.total_out + data_len_varint_len);
+    sendPacketVars.globalbufferindex -= (VARINT_MAX - len);
+  }
+  else
+  {
+    pkt = &sendPacketVars.buffer[sendPacketVars.bufferindex] - strm.total_out - data_len_varint_len - VARINT_MAX;
+    len = varint_buffer(pkt, (int32_t)(data_len_varint_len + strm.total_out));
+    memmove(pkt + len, pkt + VARINT_MAX, strm.total_out + data_len_varint_len);
+    sendPacketVars.bufferindex -= (VARINT_MAX - len);
+  }
+}
+#endif
+void sendDone()
+{
+#ifdef COMPRESSION
+  if ((sendPacketVars.packetindex >= COMPRESSION_THRESHOLD) && sendPacketVars.player->compression_flag)
+  {
+    send_compressed();
+  }
+  else
+  {
+    send_uncompressed();
+  }
+#else
+  send_uncompressed();
+#endif
   // free uneeded space if its more than MEM_CHUNK_THRESHOLD chunk sizes
   if ((ssize_t)((sendPacketVars.packetsize - sendPacketVars.packetindex) / MEM_CHUNK_SIZE) >= MEM_CHUNK_THRESHOLD)
   {

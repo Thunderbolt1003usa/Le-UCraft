@@ -18,6 +18,8 @@ else()
 endif()
 
 target_link_libraries(${PROJECT_NAME} PRIVATE lwjson)
+target_link_libraries(${PROJECT_NAME} PRIVATE zlib)
+
 
 if(UNIX)
     #run the size command afterwards
