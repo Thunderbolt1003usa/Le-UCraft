@@ -280,12 +280,29 @@ void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, i
   worldGenerateChunk(currentPlayer, x, z, from, to);
   sendPrefixedEnd();
   sendVarInt(0); // block entiies
-  for (int i = 0; i < 4; i++)
-  { // Sky Light Mask,...
-    sendVarInt(1);
-    sendLong(0);
+  sendVarInt(1); // Sky Light Mask
+  const int light_section_count = to + 1;
+  const uint64_t light_mask = (light_section_count >= 64) ? UINT64_MAX : ((1ULL << light_section_count) - 1);
+  sendLong((int64_t)light_mask);
+  // Block Light Mask
+  sendVarInt(1);
+  sendLong(0);
+  // Empty Sky Light Mask
+  sendVarInt(1);
+  sendLong(0);
+  // Empty Block Light Mask
+  sendVarInt(1);
+  sendLong((int64_t)light_mask);
+
+  sendVarInt(light_section_count); // Sky Light array count
+  for (int i = 0; i < light_section_count; i++)
+  {
+    sendVarInt(2048);
+    for (int b = 0; b < 2048; b++)
+    {
+      sendByte(0xFF);
+    }
   }
-  sendVarInt(0); // Sky Light array count
   sendVarInt(0); // Block Light array count
   sendDone();
 }
