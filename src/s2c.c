@@ -363,12 +363,16 @@ void PlayS2Centityanimation(player_t *currentPlayer, uint8_t animation)
 
 void PlayS2Csysmessage(char *message, size_t len)
 {
-  static const unsigned char NBT_text[9] = {
-      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74, 0x00};
+  static const unsigned char NBT_text[] = {
+      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74};
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_SYSTEM_CHAT);
-  sendBuffer((char *)NBT_text, 9);
-  sendString(message, len);
+  sendBuffer((char *)NBT_text, sizeof(NBT_text));
+  sendShort(len);
+  for (uint32_t i = 0; i < len; i++)
+  {
+    sendByte(message[i]);
+  }
   sendByte(0);
   sendByte(0);
   sendDone();
@@ -472,12 +476,17 @@ void PlayS2Ccompassposition(player_t *currentPlayer, int32_t x, int32_t y, int32
 }
 void PlayS2Cdisconnect(player_t *currentPlayer, char *reason)
 {
-  static const unsigned char NBT_text[9] = {
-      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74, 0x00};
+  static const unsigned char NBT_text[] = {
+      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74};
+  size_t len = strnlen(reason, sizeof(((player_t *)0)->disconnect_reason));
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_DISCONNECT);
-  sendBuffer((char *)NBT_text, 9);
-  sendString(reason, -1);
+  sendBuffer((char *)NBT_text, sizeof(NBT_text));
+  sendShort(len);
+  for (uint32_t i = 0; i < len; i++)
+  {
+    sendByte(reason[i]);
+  }
   sendByte(0);
   sendDone();
 }
