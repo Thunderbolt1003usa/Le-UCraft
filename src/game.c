@@ -8,20 +8,6 @@
 #include "UCraft.h"
 #include "blocks/blocks.h"
 
-static int32_t getYSection(double y)
-{
-    int32_t section = ((int32_t)floor(y) + 64) >> 4;
-    if (section < 5)
-    {
-        return 5;
-    }
-    if (section > 9)
-    {
-        return 9;
-    }
-    return section;
-}
-
 // fired when the server is about to start
 void gamePreload()
 {
@@ -49,10 +35,6 @@ void gamePlayerSpawned(player_t *currentPlayer)
 
     currentPlayer->gamePlayerData.chunk_spawn_event = 1;
     currentPlayer->gamePlayerData.chunk_load_event = 1;
-
-    currentPlayer->gamePlayerData.chunk_section_from = 7;
-    currentPlayer->gamePlayerData.chunk_section_to = 9;
-    currentPlayer->gamePlayerData.position_py = getYSection(currentPlayer->y);
 }
 // fired in local context
 void gamePlayerLocalTick(player_t *currentPlayer)
@@ -67,7 +49,7 @@ void gamePlayerLocalTick(player_t *currentPlayer)
             {
                 int32_t chunk_x = currentPlayer->gamePlayerData.chunk_x + (currentPlayer->chunk_px * VIEWDISTANCE);
                 int32_t chunk_z = currentPlayer->gamePlayerData.chunk_z + currentPlayer->gamePlayerData.chunk_lz;
-                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z, currentPlayer->gamePlayerData.chunk_section_from, currentPlayer->gamePlayerData.chunk_section_to);
+                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z, 5, 9);
                 if (currentPlayer->gamePlayerData.chunk_lz < VIEWDISTANCE)
                 {
                     currentPlayer->gamePlayerData.chunk_lz++;
@@ -82,7 +64,7 @@ void gamePlayerLocalTick(player_t *currentPlayer)
             {
                 int32_t chunk_x = currentPlayer->gamePlayerData.chunk_x + currentPlayer->gamePlayerData.chunk_lx;
                 int32_t chunk_z = currentPlayer->gamePlayerData.chunk_z + (currentPlayer->chunk_pz * VIEWDISTANCE);
-                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z, currentPlayer->gamePlayerData.chunk_section_from, currentPlayer->gamePlayerData.chunk_section_to);
+                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z, 5, 9);
                 if (currentPlayer->gamePlayerData.chunk_lx < VIEWDISTANCE)
                 {
                     currentPlayer->gamePlayerData.chunk_lx++;
@@ -103,8 +85,7 @@ void gamePlayerLocalTick(player_t *currentPlayer)
             // full square load
             PlayS2Cchunk(currentPlayer, currentPlayer->gamePlayerData.chunk_lx + currentPlayer->gamePlayerData.chunk_x,
                          currentPlayer->gamePlayerData.chunk_lz + currentPlayer->gamePlayerData.chunk_z,
-                         currentPlayer->gamePlayerData.chunk_section_from,
-                         currentPlayer->gamePlayerData.chunk_section_to);
+                         5, 9);
             if (currentPlayer->gamePlayerData.chunk_lx < VIEWDISTANCE)
             {
                 currentPlayer->gamePlayerData.chunk_lx++;
@@ -160,37 +141,5 @@ void gamePlayerLocalTick(player_t *currentPlayer)
             }
             currentPlayer->gamePlayerData.chunk_load_event = 1;
         }
-    }
-    // section logic {GARBAGE}
-    int32_t current_section = getYSection(currentPlayer->y);
-    if (current_section != currentPlayer->gamePlayerData.position_py)
-    {
-        int32_t section_from = current_section - 1;
-        int32_t section_to = current_section + 1;
-
-        // keep exactly 3 sections while clamping to existing terrain range 5..9
-        if (section_from < 5)
-        {
-            section_from = 5;
-            section_to = 7;
-        }
-        else if (section_to > 9)
-        {
-            section_from = 7;
-            section_to = 9;
-        }
-
-        if ((uint8_t)section_from != currentPlayer->gamePlayerData.chunk_section_from ||
-            (uint8_t)section_to != currentPlayer->gamePlayerData.chunk_section_to)
-        {
-            currentPlayer->gamePlayerData.chunk_section_from = (uint8_t)section_from;
-            currentPlayer->gamePlayerData.chunk_section_to = (uint8_t)section_to;
-            currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
-            currentPlayer->gamePlayerData.chunk_lz = -VIEWDISTANCE;
-            currentPlayer->chunk_px = 0;
-            currentPlayer->chunk_pz = 0;
-            currentPlayer->gamePlayerData.chunk_load_event = 1;
-        }
-        currentPlayer->gamePlayerData.position_py = current_section;
     }
 }

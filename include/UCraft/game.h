@@ -11,9 +11,6 @@ struct gamePlayerData_t
     // Events
     uint8_t chunk_load_event : 1;
     uint8_t chunk_spawn_event : 1;
-    // Data
-    uint8_t chunk_section_from, chunk_section_to;
-    int32_t position_py;
     // Chunk
     int32_t chunk_x, chunk_z, chunk_lx, chunk_lz;
 };
