@@ -12,9 +12,9 @@
 #define ONLINE_MODE
 #define ONLINE_MODE_AUTH // Requires ONLINE_MODE which authticates to mojang servers.
 
-#define SPAWN_X 8.00
-#define SPAWN_Y 60.00
-#define SPAWN_Z 8.00
+#define SPAWN_X 0.00
+#define SPAWN_Y 26.00
+#define SPAWN_Z 0.00
 
 #define GAMEMODE 1   // 0: Survival, 1: Creative, 2: Adventure, 3: Spectator.
 #define DIFFICULTY 2 //	0: peaceful, 1: easy, 2: normal, 3: hard

@@ -4,9 +4,9 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
 
-#define WORLD_SURFACE_MIN 48
-#define WORLD_SURFACE_MAX 95
-#define SEA_LEVEL 54
+#define WORLD_SURFACE_MIN 48 - (2 * 16)
+#define WORLD_SURFACE_MAX 95 - (2 * 16)
+#define SEA_LEVEL 56 - (2 * 16)
 
 static float lerp(float a, float b, float t)
 {
@@ -36,16 +36,6 @@ static uint8_t derive_seed(int32_t base_seed, uint32_t stream_id)
     return (uint8_t)(mixed & 0xFFu);
 }
 
-static uint32_t hash_position_2d(int32_t x, int32_t z, uint32_t seed)
-{
-    uint32_t h = ((uint32_t)x * 0x27D4EB2Du) ^ ((uint32_t)z * 0x165667B1u) ^ seed;
-    h ^= h >> 15;
-    h *= 0x85EBCA6Bu;
-    h ^= h >> 13;
-    h *= 0xC2B2AE35u;
-    h ^= h >> 16;
-    return h;
-}
 static uint32_t hash_position_3d(int32_t x, int32_t y, int32_t z, uint32_t seed)
 {
     uint32_t h = ((uint32_t)x * 0x27D4EB2Du) ^ ((uint32_t)y * 0x85EBCA77u) ^ ((uint32_t)z * 0x165667B1u) ^ seed;
@@ -172,7 +162,7 @@ static void generate_terrain_heightmap(int32_t chunk_x, int32_t chunk_z, int32_t
             float ridge_sharp = ridge * ridge;
             float mountain = mountain_mask * (12.0f + (ridge_sharp * 30.0f));
 
-            height_grid[gz][gx] = 57.0f + (continental * 7.0f) + (hills * 4.0f) + (detail * 1.5f) + mountain;
+            height_grid[gz][gx] = SEA_LEVEL + (continental * 7.0f) + (hills * 4.0f) + (detail * 1.5f) + mountain;
         }
     }
 
@@ -325,7 +315,7 @@ static void generate_tree_origin_map(int32_t chunk_x, int32_t chunk_z, int32_t w
                 continue;
             }
 
-            uint32_t hash = hash_position_2d(world_x, world_z, hash_seed);
+            uint32_t hash = hash_position_3d(world_x, 0, world_z, hash_seed);
             uint32_t roll = hash & 0xFFu;
             uint32_t chance_threshold = (forest_noise > 0.55f) ? 64u : 40u;
             if (roll >= chance_threshold)
@@ -526,7 +516,7 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
     uint16_t block_count = 0;
     switch (section_y)
     {
-    case 7: // y=48 , surface level
+    case 5: // surface level
     {
         block_count = 0;
 
@@ -583,7 +573,7 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
         send_surface_section_data(block_count, block_data);
         break;
     }
-    case 8: // y=64, surface level + 1 (hills, mountains)
+    case 6: // surface level + 1 (hills, mountains)
     {
         block_count = 0;
 
@@ -637,7 +627,7 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
         send_surface_section_data(block_count, block_data);
         break;
     }
-    case 9: // y=80, mountain continuation
+    case 7: // mountain continuation
     {
         block_count = 0;
 
@@ -867,7 +857,7 @@ static void populate_cave_section(uint64_t block_data[256], const uint8_t cave_m
     uint16_t block_count = 0;
     switch (section_y)
     {
-    case 5:
+    case 3:
         block_count = 0;
 
         for (int by = 0; by < 16; by++)
@@ -902,7 +892,7 @@ static void populate_cave_section(uint64_t block_data[256], const uint8_t cave_m
 
         send_cave_section_data(block_count, block_data);
         break;
-    case 6:
+    case 4:
         block_count = 0;
 
         for (int by = 0; by < 16; by++)
