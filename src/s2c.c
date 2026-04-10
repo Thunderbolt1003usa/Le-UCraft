@@ -269,8 +269,6 @@ void PlayS2Cchunkcenter(player_t *currentPlayer, int32_t x, int32_t z)
 }
 void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, int32_t to)
 {
-  // Thanks to bixilon(https://gitlab.bixilon.de/) for this minimal chunk
-  // generation!
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_LEVEL_CHUNK_WITH_LIGHT);
   sendInt(x);
@@ -583,7 +581,8 @@ void ConfigurationS2Cregistry()
       "unattributed_fireball",
       "wind_charge",
       "wither",
-      "wither_skull"};
+      "wither_skull",
+      "spear"};
   sendStart();
   sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
   sendString("damage_type", -1);
@@ -593,6 +592,168 @@ void ConfigurationS2Cregistry()
     sendString(damage_types[i], -1);
     sendByte(0);
   }
+  sendDone();
+
+  static const char *timeline[] = {
+      "day",
+      "early_game",
+      "moon",
+      "villager_schedule"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("timeline", -1);
+  sendVarInt(sizeof(timeline) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(timeline) / sizeof(char *)); i++)
+  {
+    sendString(timeline[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *world_clock[] = {
+      "overworld",
+      "the_end",
+  };
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("world_clock", -1);
+  sendVarInt(sizeof(world_clock) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(world_clock) / sizeof(char *)); i++)
+  {
+    sendString(world_clock[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *trim_materials[] = {
+      "diamond",
+      "redstone",
+      "emerald",
+      "lapis",
+      "quartz",
+      "resin",
+      "netherite",
+      "amethyst",
+      "copper",
+      "gold",
+      "iron"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("trim_material", -1);
+  sendVarInt(sizeof(trim_materials) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(trim_materials) / sizeof(char *)); i++)
+  {
+    sendString(trim_materials[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *chicken_variant[] = {
+      "cold",
+      "temperate",
+      "warm"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("chicken_variant", -1);
+  sendVarInt(sizeof(chicken_variant) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(chicken_variant) / sizeof(char *)); i++)
+  {
+    sendString(chicken_variant[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *jukebox_song[] = {
+      "11",
+      "13",
+      "5",
+      "blocks",
+      "cat",
+      "chirp",
+      "creator",
+      "creator_music_box",
+      "far",
+      "lava_chicken",
+      "mall",
+      "mellohi",
+      "otherside",
+      "pigstep",
+      "precipice",
+      "relic",
+      "stal",
+      "strad",
+      "tears",
+      "wait",
+      "ward"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("jukebox_song", -1);
+  sendVarInt(sizeof(jukebox_song) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(jukebox_song) / sizeof(char *)); i++)
+  {
+    sendString(jukebox_song[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *instruments[] = {
+      "admire_goat_horn",
+      "call_goat_horn",
+      "dream_goat_horn",
+      "feel_goat_horn",
+      "ponder_goat_horn",
+      "seek_goat_horn",
+      "sing_goat_horn",
+      "yearn_goat_horn"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("instrument", -1);
+  sendVarInt(sizeof(instruments) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(instruments) / sizeof(char *)); i++)
+  {
+    sendString(instruments[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("chicken_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("cat_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("cow_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("pig_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("zombie_nautilus_variant", -1);
+  sendVarInt(1);
+  sendString("temperate", -1);
+  sendByte(0);
   sendDone();
 
   sendStart();
@@ -629,14 +790,6 @@ void ConfigurationS2Cregistry()
 
   sendStart();
   sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
-  sendString("chicken_variant", -1);
-  sendVarInt(1);
-  sendString("cold", -1);
-  sendByte(0);
-  sendDone();
-
-  sendStart();
-  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
   sendString("cow_variant", -1);
   sendVarInt(1);
   sendString("cold", -1);
@@ -657,6 +810,62 @@ void ConfigurationS2Cregistry()
   sendVarInt(1);
   sendString("angry", -1);
   sendByte(0);
+  sendDone();
+}
+void ConfigurationS2Cupdatetags()
+{
+
+  static const char *damage_types_tag[] = {
+      "is_fire",
+      "is_explosion",
+      "bypasses_shield"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_UPDATE_TAGS);
+  sendByte(1);
+  sendString("damage_type", -1);
+  sendVarInt(sizeof(damage_types_tag) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(damage_types_tag) / sizeof(char *)); i++)
+  {
+    sendString(damage_types_tag[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *banner_pattern_tag[] = {
+      "pattern_item/creeper",
+      "pattern_item/flower",
+      "pattern_item/skull",
+      "pattern_item/mojang",
+      "pattern_item/skull",
+      "pattern_item/globe",
+      "pattern_item/piglin",
+      "pattern_item/flow",
+      "pattern_item/guster",
+      "pattern_item/field_masoned",
+      "pattern_item/bordure_indented"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_UPDATE_TAGS);
+  sendByte(1);
+  sendString("banner_pattern", -1);
+  sendVarInt(sizeof(banner_pattern_tag) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(banner_pattern_tag) / sizeof(char *)); i++)
+  {
+    sendString(banner_pattern_tag[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_UPDATE_TAGS);
+  sendByte(1);
+  sendString("timeline", -1);
+  sendByte(1);
+  sendString("in_overworld", -1);
+  sendByte(4);
+  sendByte(3);
+  sendByte(0);
+  sendByte(2);
+  sendByte(1);
   sendDone();
 }
 void ConfigurationS2Cready()

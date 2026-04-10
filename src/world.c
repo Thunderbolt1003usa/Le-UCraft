@@ -47,8 +47,11 @@ static uint32_t hash_position_3d(int32_t x, int32_t y, int32_t z, uint32_t seed)
     return h;
 }
 
-static void send_surface_layer_palette()
+static void send_surface_section_data(uint16_t block_count, uint16_t fluid_count, const uint64_t block_data[256])
 {
+    sendShort((int16_t)block_count); // block count
+    sendShort((int16_t)fluid_count); // fluid count
+
     sendByte(4);                       // blocks per entry
     sendVarInt(11);                    // palette length
     sendVarInt(MINECRAFT_AIR);         // palette[0]
@@ -62,11 +65,6 @@ static void send_surface_layer_palette()
     sendVarInt(MINECRAFT_WILDFLOWERS); // palette[8]
     sendVarInt(MINECRAFT_OAK_LOG);     // palette[9]
     sendVarInt(MINECRAFT_OAK_LEAVES);  // palette[10]
-}
-static void send_surface_section_data(uint16_t block_count, const uint64_t block_data[256])
-{
-    sendShort((int16_t)block_count); // block count
-    send_surface_layer_palette();
 
     for (int j = 0; j < 256; j++)
     {
@@ -76,21 +74,19 @@ static void send_surface_section_data(uint16_t block_count, const uint64_t block
     sendVarInt(0); // biome id
 }
 
-static void send_cave_layer_palette()
-{
-    sendByte(4);                 // blocks per entry
-    sendVarInt(6);               // palette length
-    sendVarInt(MINECRAFT_AIR);   // palette[0]
-    sendVarInt(MINECRAFT_STONE); // palette[1]
-    sendVarInt(MINECRAFT_COAL_ORE);
-    sendVarInt(MINECRAFT_IRON_ORE);
-    sendVarInt(MINECRAFT_DIAMOND_ORE);
-    sendVarInt(MINECRAFT_BEDROCK);
-}
 static void send_cave_section_data(uint16_t block_count, const uint64_t block_data[256])
 {
     sendShort((int16_t)block_count); // block count
-    send_cave_layer_palette();
+    sendShort(0);                    // fluid count
+
+    sendByte(4);                       // blocks per entry
+    sendVarInt(6);                     // palette length
+    sendVarInt(MINECRAFT_AIR);         // palette[0]
+    sendVarInt(MINECRAFT_STONE);       // palette[1]
+    sendVarInt(MINECRAFT_COAL_ORE);    // palette[2]
+    sendVarInt(MINECRAFT_IRON_ORE);    // palette[3]
+    sendVarInt(MINECRAFT_DIAMOND_ORE); // palette[4]
+    sendVarInt(MINECRAFT_BEDROCK);     // palette[5]
 
     for (int j = 0; j < 256; j++)
     {
@@ -514,11 +510,13 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
                                      const uint8_t decoration_map[16][16], const uint8_t tree_origin_map[16][16], int32_t section_y)
 {
     uint16_t block_count = 0;
+    uint16_t fluid_count = 0;
     switch (section_y)
     {
     case 5: // surface level
     {
         block_count = 0;
+        fluid_count = 0;
 
         for (int by = 0; by < 16; by++)
         {
@@ -547,6 +545,7 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
                     else if (world_y > terrain_height && world_y <= SEA_LEVEL)
                     {
                         palette = 4; // water above low terrain
+                        fluid_count++;
                     }
                     else if (world_y == terrain_height + 1 && terrain_height >= SEA_LEVEL && decoration != 0)
                     {
@@ -570,12 +569,13 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
                 }
             }
         }
-        send_surface_section_data(block_count, block_data);
+        send_surface_section_data(block_count, fluid_count, block_data);
         break;
     }
     case 6: // surface level + 1 (hills, mountains)
     {
         block_count = 0;
+        fluid_count = 0;
 
         for (int by = 0; by < 16; by++)
         {
@@ -624,12 +624,13 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
             }
         }
 
-        send_surface_section_data(block_count, block_data);
+        send_surface_section_data(block_count, fluid_count, block_data);
         break;
     }
     case 7: // mountain continuation
     {
         block_count = 0;
+        fluid_count = 0;
 
         for (int by = 0; by < 16; by++)
         {
@@ -677,7 +678,7 @@ static void populate_surface_section(uint64_t block_data[256], const int8_t terr
             }
         }
 
-        send_surface_section_data(block_count, block_data);
+        send_surface_section_data(block_count, fluid_count, block_data);
         break;
     }
     }
@@ -995,6 +996,7 @@ void worldGenerateChunk(player_t *currentPlayer, int32_t x, int32_t z, size_t fr
         else
         {
             sendShort(0);              // block count
+            sendShort(0);              // fluid count
             sendByte(0);               // blocks singular
             sendVarInt(MINECRAFT_AIR); // block id
             sendByte(0);               // biome singular

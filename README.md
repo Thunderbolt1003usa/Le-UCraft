@@ -1,7 +1,7 @@
 # Ucraft
 A lightweight **Minecraft server implementation written in C**, designed for machines with limited resources.
 
-Currently supports **Minecraft version 1.21.10** for clients.  
+Currently supports **Minecraft version 26.1.2** for clients.  
 Implementation details for a **lightbulb** can be found [here][5].
 
 ### Building
