@@ -211,6 +211,7 @@ void PlayS2Cbossbar(player_t *currentPlayer, uint16_t uuid, int32_t action,
 void PlayS2Centitydata(player_t *currentPlayer, uint8_t entity, EntityDataMetadata type, EntityState state);
 void PlayS2Ccompassposition(player_t *currentPlayer, int32_t x, int32_t y, int32_t z);
 void PlayS2Cdisconnect(player_t *currentPlayer, char *reason);
+void PlayS2Csettime(int64_t time_of_day, uint8_t time_of_day_increasing);
 void ConfigurationS2Cfeatures();
 void ConfigurationS2Cknownpacks();
 void ConfigurationS2Cregistry();

@@ -247,6 +247,7 @@ static void s2cHandler()
                     PlayS2Ctablist(p, TABLIST_ACTION_ADDPLAYER | TABLIST_ACTION_LISTED, p->id);
                     PlayS2Cspawnentity(p, ENTITY_METADATA_TYPE_PLAYER);
                     PlayS2Centitydata(p, PLAYER_SKIN_PARTS_FLAGS, ENTITY_DATA_BYTE, p->skin_parts); // enable from cape to hat
+                    PlayS2Cteleport(p, p->x, p->y, p->z);
                 }
             }
             gamePlayerSpawned(currentPlayer);

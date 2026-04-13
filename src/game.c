@@ -8,9 +8,13 @@
 #include "UCraft.h"
 #include "blocks/blocks.h"
 
+static gameData_t gameData;
+
 // fired when the server is about to start
 void gamePreload()
 {
+    memset(&gameData, 0, sizeof(gameData_t));
+    gameData.time = 24000 / 4; // noon
 }
 // fired when a player leaves
 void gamePlayerLeft(player_t *currentPlayer)
@@ -20,6 +24,25 @@ void gamePlayerLeft(player_t *currentPlayer)
 // NOTE: this will run even if there are no players so be careful when sending packets
 void gameGlobalTick()
 {
+
+    if ((main_tick % (TICK_TIME_MS * 100)) == 0) // update the time on the client after every 10 seconds
+    {
+        if (playerGetActiveCount() > 0)
+        {
+            PlayS2Csettime(gameData.time, 0);
+        }
+    }
+    if ((main_tick % (TICK_TIME_MS * 10)) == 0) // should be every second
+    {
+        if (gameData.time < 24000)
+        {
+            gameData.time += 20;
+        }
+        else
+        {
+            gameData.time = 0;
+        }
+    }
 }
 // fired every tick in the global context for the current player {so it will replicate for others}
 void gamePlayerGlobalTick(player_t *currentPlayer)
@@ -35,6 +58,9 @@ void gamePlayerSpawned(player_t *currentPlayer)
 
     currentPlayer->gamePlayerData.chunk_spawn_event = 1;
     currentPlayer->gamePlayerData.chunk_load_event = 1;
+
+    // Update Time
+    PlayS2Csettime(gameData.time, 0);
 }
 // fired in local context
 void gamePlayerLocalTick(player_t *currentPlayer)

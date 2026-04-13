@@ -16,6 +16,12 @@ struct gamePlayerData_t
 };
 typedef struct gamePlayerData_t gamePlayerData_t;
 
+struct gameData_t
+{
+    size_t time;
+};
+typedef struct gameData_t gameData_t;
+
 void gamePreload();
 void gamePlayerSpawned(player_t *currentPlayer);
 void gameGlobalPlayerMoved(player_t *currentPlayer);

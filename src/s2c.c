@@ -488,6 +488,14 @@ void PlayS2Cdisconnect(player_t *currentPlayer, char *reason)
   sendByte(0);
   sendDone();
 }
+void PlayS2Csettime(int64_t time_of_day, uint8_t time_of_day_increasing)
+{
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_SET_TIME);
+  sendLong(time_of_day);
+  sendByte(time_of_day_increasing ? 1 : 0);
+  sendDone();
+}
 void ConfigurationS2Cfeatures()
 {
   sendStart();
