@@ -4,9 +4,38 @@
 #define STB_PERLIN_IMPLEMENTATION
 #include "stb_perlin.h"
 
+// Chunk generation currently populates only sections 3 through 7 (inclusive).
 #define WORLD_SURFACE_MIN 48 - (2 * 16)
 #define WORLD_SURFACE_MAX 95 - (2 * 16)
 #define SEA_LEVEL 56 - (2 * 16)
+
+static int8_t terrain_heightmap[16][16]; // 16*16*1 = 256 bytes
+static int8_t basin_depthmap[16][16];    // 16*16*1 = 256 bytes
+static uint8_t decoration_map[16][16];   // 16*16*1 = 256 bytes
+static uint8_t tree_origin_map[16][16];  // 16*16*1 = 256 bytes
+static uint8_t cave_map[16][16];         // 16*16*1 = 256 bytes
+static uint8_t ore_map[3][16][16];       // 3*16*16 = 768 bytes
+static uint64_t block_data[256];         // 256*8 = 2048 bytes
+
+static const int32_t surface_section_palette[] = {
+    MINECRAFT_AIR,
+    MINECRAFT_GRASS_BLOCK,
+    MINECRAFT_DIRT,
+    MINECRAFT_STONE,
+    MINECRAFT_WATER,
+    MINECRAFT_SHORT_GRASS,
+    MINECRAFT_DANDELION,
+    MINECRAFT_POPPY,
+    MINECRAFT_WILDFLOWERS,
+    MINECRAFT_OAK_LOG,
+    MINECRAFT_OAK_LEAVES};
+static const int32_t cave_section_palette[] = {
+    MINECRAFT_AIR,
+    MINECRAFT_STONE,
+    MINECRAFT_COAL_ORE,
+    MINECRAFT_IRON_ORE,
+    MINECRAFT_DIAMOND_ORE,
+    MINECRAFT_BEDROCK};
 
 static float lerp(float a, float b, float t)
 {
@@ -47,56 +76,7 @@ static uint32_t hash_position_3d(int32_t x, int32_t y, int32_t z, uint32_t seed)
     return h;
 }
 
-static void send_surface_section_data(uint16_t block_count, uint16_t fluid_count, const uint64_t block_data[256])
-{
-    sendShort((int16_t)block_count); // block count
-    sendShort((int16_t)fluid_count); // fluid count
-
-    sendByte(4);                       // blocks per entry
-    sendVarInt(11);                    // palette length
-    sendVarInt(MINECRAFT_AIR);         // palette[0]
-    sendVarInt(MINECRAFT_GRASS_BLOCK); // palette[1]
-    sendVarInt(MINECRAFT_DIRT);        // palette[2]
-    sendVarInt(MINECRAFT_STONE);       // palette[3]
-    sendVarInt(MINECRAFT_WATER);       // palette[4]
-    sendVarInt(MINECRAFT_SHORT_GRASS); // palette[5]
-    sendVarInt(MINECRAFT_DANDELION);   // palette[6]
-    sendVarInt(MINECRAFT_POPPY);       // palette[7]
-    sendVarInt(MINECRAFT_WILDFLOWERS); // palette[8]
-    sendVarInt(MINECRAFT_OAK_LOG);     // palette[9]
-    sendVarInt(MINECRAFT_OAK_LEAVES);  // palette[10]
-
-    for (int j = 0; j < 256; j++)
-    {
-        sendLong((int64_t)block_data[j]);
-    }
-    sendByte(0);   // biome singular
-    sendVarInt(0); // biome id
-}
-
-static void send_cave_section_data(uint16_t block_count, const uint64_t block_data[256])
-{
-    sendShort((int16_t)block_count); // block count
-    sendShort(0);                    // fluid count
-
-    sendByte(4);                       // blocks per entry
-    sendVarInt(6);                     // palette length
-    sendVarInt(MINECRAFT_AIR);         // palette[0]
-    sendVarInt(MINECRAFT_STONE);       // palette[1]
-    sendVarInt(MINECRAFT_COAL_ORE);    // palette[2]
-    sendVarInt(MINECRAFT_IRON_ORE);    // palette[3]
-    sendVarInt(MINECRAFT_DIAMOND_ORE); // palette[4]
-    sendVarInt(MINECRAFT_BEDROCK);     // palette[5]
-
-    for (int j = 0; j < 256; j++)
-    {
-        sendLong((int64_t)block_data[j]);
-    }
-    sendByte(0);   // biome singular
-    sendVarInt(0); // biome id
-}
-
-static void generate_terrain_heightmap(int32_t chunk_x, int32_t chunk_z, int32_t world_seed, int8_t heightmap[16][16])
+static void generate_terrain_heightmap(int32_t chunk_x, int32_t chunk_z, int32_t world_seed)
 {
     float height_grid[5][5];
     const int32_t chunk_world_x = chunk_x << 4;
@@ -181,12 +161,12 @@ static void generate_terrain_heightmap(int32_t chunk_x, int32_t chunk_z, int32_t
             float hx1 = lerp(h01, h11, tx);
             float blended_height = lerp(hx0, hx1, tz);
 
-            heightmap[bz][bx] = (int8_t)clamp_i32((int32_t)blended_height, WORLD_SURFACE_MIN, WORLD_SURFACE_MAX);
+            terrain_heightmap[bz][bx] = (int8_t)clamp_i32((int32_t)blended_height, WORLD_SURFACE_MIN, WORLD_SURFACE_MAX);
         }
     }
 }
 
-static void generate_basin_depth_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed, int8_t basin_depthmap[16][16])
+static void generate_basin_depth_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed)
 {
     float basin_grid[5][5];
     const int32_t chunk_world_x = chunk_x << 4;
@@ -250,8 +230,7 @@ static void generate_basin_depth_map(int32_t chunk_x, int32_t chunk_z, int32_t w
     }
 }
 
-static void generate_tree_origin_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed, const int8_t terrain_heightmap[16][16],
-                                     const int8_t basin_depthmap[16][16], uint8_t tree_origin_map[16][16])
+static void generate_tree_origin_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed)
 {
     const int32_t chunk_world_x = chunk_x << 4;
     const int32_t chunk_world_z = chunk_z << 4;
@@ -346,8 +325,7 @@ static void generate_tree_origin_map(int32_t chunk_x, int32_t chunk_z, int32_t w
     }
 }
 
-static int get_tree_palette_for_voxel(int32_t bx, int32_t bz, int32_t world_y, const int8_t terrain_heightmap[16][16],
-                                      const uint8_t tree_origin_map[16][16])
+static int get_tree_palette_for_voxel(int32_t bx, int32_t bz, int32_t world_y)
 {
     int has_leaves = 0;
     int32_t min_z = clamp_i32(bz - 2, 0, 15);
@@ -412,7 +390,7 @@ static int get_tree_palette_for_voxel(int32_t bx, int32_t bz, int32_t world_y, c
     return has_leaves ? 10 : 0; // oak leaves or no tree
 }
 
-static void generate_surface_decoration_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed, uint8_t decoration_map[16][16])
+static void generate_surface_decoration_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed)
 {
     float density_grid[5][5];
     float type_grid[5][5];
@@ -506,184 +484,7 @@ static void generate_surface_decoration_map(int32_t chunk_x, int32_t chunk_z, in
     }
 }
 
-static void populate_surface_section(uint64_t block_data[256], const int8_t terrain_heightmap[16][16], const int8_t basin_depthmap[16][16],
-                                     const uint8_t decoration_map[16][16], const uint8_t tree_origin_map[16][16], int32_t section_y)
-{
-    uint16_t block_count = 0;
-    uint16_t fluid_count = 0;
-    switch (section_y)
-    {
-    case 5: // surface level
-    {
-        block_count = 0;
-        fluid_count = 0;
-
-        for (int by = 0; by < 16; by++)
-        {
-            int32_t world_y = ((section_y << 4) + by) - 64;
-            for (int bz = 0; bz < 16; bz++)
-            {
-                for (int bx = 0; bx < 16; bx++)
-                {
-                    int palette = 0;
-                    int8_t terrain_height = terrain_heightmap[bz][bx];
-                    uint8_t decoration = decoration_map[bz][bx];
-                    int32_t depth = terrain_height - world_y;
-
-                    if (depth == 0)
-                    {
-                        palette = (terrain_height >= SEA_LEVEL) ? 1 : 2; // underwater surface becomes dirt
-                    }
-                    else if (depth > 0 && depth <= 2)
-                    {
-                        palette = 2; // dirt just below the top
-                    }
-                    else if (depth > 2)
-                    {
-                        palette = 3; // stone inside terrain
-                    }
-                    else if (world_y > terrain_height && world_y <= SEA_LEVEL)
-                    {
-                        palette = 4; // water above low terrain
-                        fluid_count++;
-                    }
-                    else if (world_y == terrain_height + 1 && terrain_height >= SEA_LEVEL && decoration != 0)
-                    {
-                        palette = (int)decoration; // surface decoration above grass
-                    }
-
-                    int tree_palette = get_tree_palette_for_voxel(bx, bz, world_y, terrain_heightmap, tree_origin_map);
-                    if (tree_palette != 0)
-                    {
-                        palette = tree_palette;
-                    }
-
-                    if (palette != 0)
-                    {
-                        int index = (by << 8) | (bz << 4) | bx;
-                        uint8_t data_index = index >> 4;
-                        int bit_index = (index & 0xF) << 2;
-                        block_data[data_index] |= (uint64_t)palette << bit_index;
-                        block_count++;
-                    }
-                }
-            }
-        }
-        send_surface_section_data(block_count, fluid_count, block_data);
-        break;
-    }
-    case 6: // surface level + 1 (hills, mountains)
-    {
-        block_count = 0;
-        fluid_count = 0;
-
-        for (int by = 0; by < 16; by++)
-        {
-            int32_t world_y = ((section_y << 4) + by) - 64;
-            for (int bz = 0; bz < 16; bz++)
-            {
-                for (int bx = 0; bx < 16; bx++)
-                {
-                    int palette = 0;
-                    int32_t terrain_height = terrain_heightmap[bz][bx];
-                    uint8_t decoration = decoration_map[bz][bx];
-                    int32_t depth = terrain_height - world_y;
-
-                    if (depth == 0)
-                    {
-                        palette = 1; // grass block on the top
-                    }
-                    else if (depth > 0 && depth <= 2)
-                    {
-                        palette = 2; // dirt just below the top
-                    }
-                    else if (depth > 2)
-                    {
-                        palette = 3; // stone inside hills/mountains
-                    }
-                    else if (world_y == terrain_height + 1 && terrain_height >= SEA_LEVEL && decoration != 0)
-                    {
-                        palette = (int)decoration; // surface decoration above grass
-                    }
-
-                    int tree_palette = get_tree_palette_for_voxel(bx, bz, world_y, terrain_heightmap, tree_origin_map);
-                    if (tree_palette != 0)
-                    {
-                        palette = tree_palette;
-                    }
-
-                    if (palette != 0)
-                    {
-                        int index = (by << 8) | (bz << 4) | bx;
-                        uint8_t data_index = index >> 4;
-                        int bit_index = (index & 0xF) << 2;
-                        block_data[data_index] |= (uint64_t)palette << bit_index;
-                        block_count++;
-                    }
-                }
-            }
-        }
-
-        send_surface_section_data(block_count, fluid_count, block_data);
-        break;
-    }
-    case 7: // mountain continuation
-    {
-        block_count = 0;
-        fluid_count = 0;
-
-        for (int by = 0; by < 16; by++)
-        {
-            int32_t world_y = ((section_y << 4) + by) - 64;
-            for (int bz = 0; bz < 16; bz++)
-            {
-                for (int bx = 0; bx < 16; bx++)
-                {
-                    int palette = 0;
-                    int32_t terrain_height = terrain_heightmap[bz][bx];
-                    uint8_t decoration = decoration_map[bz][bx];
-                    int32_t depth = terrain_height - world_y;
-
-                    if (depth == 0)
-                    {
-                        palette = 1; // grass on mountain top
-                    }
-                    else if (depth > 0 && depth <= 2)
-                    {
-                        palette = 2; // topsoil
-                    }
-                    else if (depth > 2)
-                    {
-                        palette = 3; // mountain stone mass
-                    }
-                    else if (world_y == terrain_height + 1 && terrain_height >= SEA_LEVEL && decoration != 0)
-                    {
-                        palette = (int)decoration; // seeded surface decoration above grass
-                    }
-
-                    int tree_palette = get_tree_palette_for_voxel(bx, bz, world_y, terrain_heightmap, tree_origin_map);
-                    if (tree_palette != 0)
-                    {
-                        palette = tree_palette;
-                    }
-                    if (palette != 0)
-                    {
-                        int index = (by << 8) | (bz << 4) | bx;
-                        uint8_t data_index = index >> 4;
-                        int bit_index = (index & 0xF) << 2;
-                        block_data[data_index] |= (uint64_t)palette << bit_index;
-                        block_count++;
-                    }
-                }
-            }
-        }
-
-        send_surface_section_data(block_count, fluid_count, block_data);
-        break;
-    }
-    }
-}
-static void generate_cave_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed, uint8_t cave_map[16][16])
+static void generate_cave_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed)
 {
     float cave_base_grid[5][5];
     float cave_detail_grid[5][5];
@@ -754,7 +555,7 @@ static void generate_cave_map(int32_t chunk_x, int32_t chunk_z, int32_t world_se
         }
     }
 }
-static void generate_ore_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed, uint8_t ore_map[3][16][16])
+static void generate_ore_map(int32_t chunk_x, int32_t chunk_z, int32_t world_seed)
 {
     float coal_grid[5][5];
     float iron_grid[5][5];
@@ -852,89 +653,162 @@ static void generate_ore_map(int32_t chunk_x, int32_t chunk_z, int32_t world_see
         }
     }
 }
-static void populate_cave_section(uint64_t block_data[256], const uint8_t cave_map[16][16], const uint8_t ore_map[3][16][16],
-                                  int32_t chunk_x, int32_t chunk_z, int32_t section_y)
+
+static int get_surface_block_palette(uint8_t local_chunk_x, uint8_t local_chunk_z, int32_t world_y)
 {
-    uint16_t block_count = 0;
-    switch (section_y)
+    int palette = 0;
+    int8_t terrain_height = terrain_heightmap[local_chunk_z][local_chunk_x];
+    uint8_t decoration = decoration_map[local_chunk_z][local_chunk_x];
+    int32_t depth = terrain_height - world_y;
+    if ((world_y >= ((5 << 4) + 0) - 64) && (world_y < ((5 << 4) + 16) - 64)) // section 5: surface level
     {
-    case 3:
-        block_count = 0;
 
-        for (int by = 0; by < 16; by++)
+        if (depth == 0)
         {
-            int palette = 0;
-            if (by == 13)
-            {
-                palette = 5; // bedrock (layer 14)
-            }
-            else if (by >= 14)
-            {
-                palette = 1; // stone (layers 15 and 16)
-            }
-
-            if (palette == 0)
-            {
-                continue;
-            }
-
-            for (int bz = 0; bz < 16; bz++)
-            {
-                for (int bx = 0; bx < 16; bx++)
-                {
-                    int index = (by << 8) | (bz << 4) | bx;
-                    uint8_t data_index = index >> 4;
-                    int bit_index = (index & 0xF) << 2;
-                    block_data[data_index] |= (uint64_t)palette << bit_index;
-                    block_count++;
-                }
-            }
+            palette = (terrain_height >= SEA_LEVEL) ? 1 : 2; // underwater surface becomes dirt
+        }
+        else if (depth > 0 && depth <= 2)
+        {
+            palette = 2; // dirt just below the top
+        }
+        else if (depth > 2)
+        {
+            palette = 3; // stone inside terrain
+        }
+        else if (world_y > terrain_height && world_y <= SEA_LEVEL)
+        {
+            palette = 4; // water above low terrain
+        }
+        else if (world_y == terrain_height + 1 && terrain_height >= SEA_LEVEL && decoration != 0)
+        {
+            palette = (int)decoration; // surface decoration above grass
         }
 
-        send_cave_section_data(block_count, block_data);
-        break;
-    case 4:
-        block_count = 0;
+        int tree_palette = get_tree_palette_for_voxel(local_chunk_x, local_chunk_z, world_y);
+        if (tree_palette != 0)
+        {
+            palette = tree_palette;
+        }
+    }
+    else if ((world_y >= ((6 << 4) + 0) - 64) && (world_y < ((6 << 4) + 16) - 64)) // section 6: surface level + 1 (hills, mountains)
+    {
+        if (depth == 0)
+        {
+            palette = 1; // grass block on the top
+        }
+        else if (depth > 0 && depth <= 2)
+        {
+            palette = 2; // dirt just below the top
+        }
+        else if (depth > 2)
+        {
+            palette = 3; // stone inside hills/mountains
+        }
+        else if (world_y == terrain_height + 1 && terrain_height >= SEA_LEVEL && decoration != 0)
+        {
+            palette = (int)decoration; // surface decoration above grass
+        }
 
+        int tree_palette = get_tree_palette_for_voxel(local_chunk_x, local_chunk_z, world_y);
+        if (tree_palette != 0)
+        {
+            palette = tree_palette;
+        }
+    }
+    else if ((world_y >= ((7 << 4) + 0) - 64) && (world_y < ((7 << 4) + 16) - 64)) // section 7: mountain continuation
+    {
+
+        if (depth == 0)
+        {
+            palette = 1; // grass on mountain top
+        }
+        else if (depth > 0 && depth <= 2)
+        {
+            palette = 2; // topsoil
+        }
+        else if (depth > 2)
+        {
+            palette = 3; // mountain stone mass
+        }
+        else if (world_y == terrain_height + 1 && terrain_height >= SEA_LEVEL && decoration != 0)
+        {
+            palette = (int)decoration; // seeded surface decoration above grass
+        }
+
+        int tree_palette = get_tree_palette_for_voxel(local_chunk_x, local_chunk_z, world_y);
+        if (tree_palette != 0)
+        {
+            palette = tree_palette;
+        }
+    }
+    return palette;
+}
+
+static int get_cave_block_palette(uint8_t local_chunk_x, uint8_t local_chunk_z, int32_t world_y)
+{
+    int palette = 0;
+    // TODO: simplify this later
+    if ((world_y >= ((3 << 4) + 0) - 64) && (world_y < ((3 << 4) + 16) - 64)) // section 3: boundry
+    {
+        if ((world_y + 64) - (3 << 4) == 13)
+        {
+            palette = 5; // bedrock (layer 14)
+        }
+        else if ((world_y + 64) - (3 << 4) >= 14)
+        {
+            palette = 1; // stone (layers 15 and 16)
+        }
+    }
+    else if ((world_y >= ((4 << 4) + 0) - 64) && (world_y < ((4 << 4) + 16) - 64)) // section 4: cave level
+    {
+        uint8_t threshold = (uint8_t)lerp(145.0f, 85.0f, 1.0f - (world_y * 0.1f)); // pointiness factor
+
+        if (cave_map[local_chunk_z][local_chunk_x] < threshold)
+        {
+            int32_t coal_score = ore_map[0][local_chunk_z][local_chunk_x] + ((world_y * 40) / 15);
+            int32_t iron_score = ore_map[1][local_chunk_z][local_chunk_x] + (52 * (world_y) / 8);
+            int32_t diamond_score = ore_map[2][local_chunk_z][local_chunk_x] + (((15 - world_y) * 70) / 15);
+
+            palette = 1; // stone
+
+            if (diamond_score > 152)
+            {
+                palette = 4; // diamond
+            }
+            else if (iron_score > 140)
+            {
+                palette = 3; // iron
+            }
+            else if (coal_score > 130)
+            {
+                palette = 2; // coal
+            }
+        }
+    }
+    return palette;
+}
+
+static void populate_surface_sections(int32_t section_y)
+{
+    int16_t block_count = 0;
+    int16_t fluid_count = 0;
+    switch (section_y)
+    {
+    case 5: // surface level
+    case 6: // surface level + 1 (hills, mountains)
+    case 7: // mountain continuation
+    {
         for (int by = 0; by < 16; by++)
         {
             int32_t world_y = ((section_y << 4) + by) - 64;
-            float center_bias = 1.0f - (float)(fabs(((float)by + 0.5f) - 8.0f) / 8.0f);
-            uint8_t carve_threshold = (uint8_t)lerp(145.0f, 85.0f, center_bias);
-
             for (int bz = 0; bz < 16; bz++)
             {
                 for (int bx = 0; bx < 16; bx++)
                 {
-                    int palette = 0;
-                    if (cave_map[bz][bx] < carve_threshold)
+                    int palette = get_surface_block_palette(bx, bz, world_y);
+                    if (palette == 4)
                     {
-                        palette = 1;
-
-                        float coal_depth_bias = (float)by / 15.0f;
-                        float iron_depth_bias = 1.0f - (float)(fabs((float)by - 8.0f) / 8.0f);
-                        float diamond_depth_bias = 1.0f - ((float)by / 15.0f);
-
-                        int32_t coal_score = ore_map[0][bz][bx] + (int32_t)(coal_depth_bias * 40.0f);
-                        int32_t iron_score = ore_map[1][bz][bx] + (int32_t)(iron_depth_bias * 52.0f);
-                        int32_t diamond_score = ore_map[2][bz][bx] + (int32_t)(diamond_depth_bias * 70.0f);
-
-                        int32_t world_x = (chunk_x << 4) + bx;
-                        int32_t world_z = (chunk_z << 4) + bz;
-                        uint32_t ore_roll = hash_position_3d(world_x, world_y, world_z, derive_seed(WORLD_SEED, 20u)) & 0xFFu;
-
-                        if (diamond_score > 165 && ore_roll < 56u)
-                        {
-                            palette = 4;
-                        }
-                        else if (iron_score > 148 && ore_roll < 100u)
-                        {
-                            palette = 3;
-                        }
-                        else if (coal_score > 130 && ore_roll < 150u)
-                        {
-                            palette = 2;
-                        }
+                        fluid_count++; // water
                     }
                     if (palette != 0)
                     {
@@ -947,30 +821,81 @@ static void populate_cave_section(uint64_t block_data[256], const uint8_t cave_m
                 }
             }
         }
+        sendShort(block_count); // block count
+        sendShort(fluid_count); // fluid count
 
-        send_cave_section_data(block_count, block_data);
+        sendByte(4); // blocks per entry
+        sendVarInt(sizeof(surface_section_palette) / sizeof(surface_section_palette[0]));
+        for (size_t palette_idx = 0; palette_idx < (sizeof(surface_section_palette) / sizeof(surface_section_palette[0])); palette_idx++)
+        {
+            sendVarInt(surface_section_palette[palette_idx]);
+        }
+
+        for (size_t j = 0; j < 256; j++)
+        {
+            sendLong((int64_t)block_data[j]);
+        }
+        sendByte(0);   // biome singular
+        sendVarInt(0); // biome id
+        break;
+    }
+    }
+}
+
+static void populate_cave_sections(int32_t chunk_x, int32_t chunk_z, int32_t section_y)
+{
+    uint16_t block_count = 0;
+    switch (section_y)
+    {
+    case 3: // boundry
+    case 4: // cave level
+        block_count = 0;
+
+        for (int by = 0; by < 16; by++)
+        {
+            int32_t world_y = ((section_y << 4) + by) - 64;
+            for (int bz = 0; bz < 16; bz++)
+            {
+                for (int bx = 0; bx < 16; bx++)
+                {
+                    int palette = get_cave_block_palette(bx, bz, world_y);
+
+                    if (palette != 0)
+                    {
+                        int index = (by << 8) | (bz << 4) | bx;
+                        uint8_t data_index = index >> 4;
+                        int bit_index = (index & 0xF) << 2;
+                        block_data[data_index] |= (uint64_t)palette << bit_index;
+                        block_count++;
+                    }
+                }
+            }
+        }
+        sendShort((int16_t)block_count); // block count
+        sendShort(0);                    // fluid count
+
+        sendByte(4); // blocks per entry
+        sendVarInt(sizeof(cave_section_palette) / sizeof(cave_section_palette[0]));
+        for (size_t palette_idx = 0; palette_idx < (sizeof(cave_section_palette) / sizeof(cave_section_palette[0])); palette_idx++)
+        {
+            sendVarInt(cave_section_palette[palette_idx]);
+        }
+
+        for (size_t j = 0; j < 256; j++)
+        {
+            sendLong((int64_t)block_data[j]);
+        }
+        sendByte(0);   // biome singular
+        sendVarInt(0); // biome id
         break;
     }
 }
-void worldGenerateChunk(player_t *currentPlayer, int32_t x, int32_t z, size_t from, size_t to)
+static void generate_surface_heightmaps(int32_t chunk_x, int32_t chunk_z)
 {
-    if ((int)(to - from) < 0)
-    {
-        return;
-    }
-    uint64_t block_data[256]; // 256*8 = 2048 bytes
-
-    int8_t terrain_heightmap[16][16]; // 16*16*1 = 256 bytes
-    int8_t basin_depthmap[16][16];    // 16*16*1 = 256 bytes
-    uint8_t decoration_map[16][16];   // 16*16*1 = 256 bytes
-    uint8_t tree_origin_map[16][16];  // 16*16*1 = 256 bytes
-    uint8_t cave_map[16][16];         // 16*16*1 = 256 bytes
-    uint8_t ore_map[3][16][16];       // 3*16*16 = 768 bytes
-
-    generate_terrain_heightmap(x, z, WORLD_SEED, terrain_heightmap);
-    generate_basin_depth_map(x, z, WORLD_SEED, basin_depthmap);
-    generate_tree_origin_map(x, z, WORLD_SEED, terrain_heightmap, basin_depthmap, tree_origin_map);
-    generate_surface_decoration_map(x, z, WORLD_SEED, decoration_map);
+    generate_terrain_heightmap(chunk_x, chunk_z, WORLD_SEED);
+    generate_basin_depth_map(chunk_x, chunk_z, WORLD_SEED);
+    generate_tree_origin_map(chunk_x, chunk_z, WORLD_SEED);
+    generate_surface_decoration_map(chunk_x, chunk_z, WORLD_SEED);
 
     for (int32_t bz = 0; bz < 16; bz++)
     {
@@ -980,18 +905,66 @@ void worldGenerateChunk(player_t *currentPlayer, int32_t x, int32_t z, size_t fr
             terrain_heightmap[bz][bx] = (int8_t)clamp_i32(carved_height, WORLD_SURFACE_MIN, WORLD_SURFACE_MAX);
         }
     }
+}
+static void generate_cave_heightmaps(int32_t chunk_x, int32_t chunk_z)
+{
+    generate_cave_map(chunk_x, chunk_z, WORLD_SEED);
+    generate_ore_map(chunk_x, chunk_z, WORLD_SEED);
+}
 
-    generate_cave_map(x, z, WORLD_SEED, cave_map);
-    generate_ore_map(x, z, WORLD_SEED, ore_map);
-    size_t section_count = from;
+int worldGetBlock(int32_t x, int32_t y, int32_t z)
+{
+    // TODO: Add caching later
+    int palette;
+    int32_t section_y = (y + 64) >> 4;
+    int32_t chunk_x = x >> 4;
+    int32_t chunk_z = z >> 4;
+    uint8_t local_chunk_x = (uint8_t)(x - (chunk_x << 4));
+    uint8_t local_chunk_z = (uint8_t)(z - (chunk_z << 4));
+
+    if (section_y >= 5 && section_y <= 7)
+    {
+        generate_surface_heightmaps(chunk_x, chunk_z);
+        palette = get_surface_block_palette(local_chunk_x, local_chunk_z, y);
+        if (palette >= 0 && palette < (int)(sizeof(surface_section_palette) / sizeof(surface_section_palette[0])))
+        {
+            return surface_section_palette[palette];
+        }
+        return MINECRAFT_AIR;
+    }
+
+    if (section_y >= 3 && section_y <= 4)
+    {
+        generate_cave_heightmaps(chunk_x, chunk_z);
+        palette = get_cave_block_palette(local_chunk_x, local_chunk_z, y);
+        if (palette >= 0 && palette < (int)(sizeof(cave_section_palette) / sizeof(cave_section_palette[0])))
+        {
+            return cave_section_palette[palette];
+        }
+        return MINECRAFT_AIR;
+    }
+
+    return MINECRAFT_AIR;
+}
+
+void worldGenerateChunk(int32_t chunk_x, int32_t chunk_z, size_t from, size_t to)
+{
+
+    if ((int)(to - from) < 0)
+    {
+        return;
+    }
+    generate_surface_heightmaps(chunk_x, chunk_z);
+    generate_cave_heightmaps(chunk_x, chunk_z);
+
     for (size_t i = 0; i < 24; i++)
     {
-        if ((i == section_count) && (section_count <= to))
+        if ((i == from) && (from <= to))
         {
             memset(block_data, 0, sizeof(block_data));
-            populate_cave_section(block_data, cave_map, ore_map, x, z, i);
-            populate_surface_section(block_data, terrain_heightmap, basin_depthmap, decoration_map, tree_origin_map, i);
-            section_count++;
+            populate_cave_sections(chunk_x, chunk_z, i);
+            populate_surface_sections(i);
+            from++;
         }
         else
         {

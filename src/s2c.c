@@ -275,7 +275,7 @@ void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, i
   sendInt(z);
   sendVarInt(0); // Heightmap count
   sendPrefixedStart();
-  worldGenerateChunk(currentPlayer, x, z, from, to);
+  worldGenerateChunk(x, z, from, to);
   sendPrefixedEnd();
   sendVarInt(0); // block entiies
   sendVarInt(1); // Sky Light Mask
