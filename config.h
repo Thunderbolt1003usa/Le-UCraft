@@ -16,7 +16,7 @@
 #define SPAWN_Y 26.00
 #define SPAWN_Z 0.00
 
-#define GAMEMODE 1   // 0: Survival, 1: Creative, 2: Adventure, 3: Spectator.
+#define GAMEMODE 0   // 0: Survival, 1: Creative, 2: Adventure, 3: Spectator.
 #define DIFFICULTY 2 //	0: peaceful, 1: easy, 2: normal, 3: hard
 #define VIEWDISTANCE 2
 #define WORLD_SEED 67

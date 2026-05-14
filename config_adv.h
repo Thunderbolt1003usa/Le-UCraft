@@ -3,7 +3,7 @@
 
 #define ENDIAN 1 // 1: little, 0:big
 
-#define TICK_TIME_MS 10
+#define TICK_TIME_MS 5
 #define MEM_CHUNK_SIZE 256    // Allocation granularity
 #define MEM_CHUNK_THRESHOLD 2 // Number of chunks to allocate before reallocating
 
@@ -14,7 +14,7 @@
 
 #define AUTH_HOST "sessionserver.mojang.com"
 #define AUTH_HOST_PORT "443"
-#define AUTH_TIMEOUT 400 // Number of ticks before timing out
+#define AUTH_TIMEOUT 800 // Number of ticks before timing out
 
 #define PLAYER_BASE 0x4
 

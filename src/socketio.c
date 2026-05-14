@@ -41,9 +41,9 @@ void readBuffer(char *buffer, size_t size)
     buffer[i] = readByte();
   }
 }
-uint16_t readShort()
+int16_t readShort()
 {
-  uint16_t ret = 0;
+  int16_t ret = 0;
 #if (ENDIAN)
   ret |= readByte() << 8;
   ret |= readByte();
@@ -121,6 +121,19 @@ void readPosition(int32_t *x, int32_t *y, int32_t *z)
   *x = (pos >> 38) & 0x3FFFFFF;
   *z = (pos >> 12) & 0x3FFFFFF;
   *y = pos & 0xFFF;
+
+  if (*x >= 1 << 25)
+  {
+    *x -= 1 << 26;
+  }
+  if (*y >= 1 << 11)
+  {
+    *y -= 1 << 12;
+  }
+  if (*z >= 1 << 25)
+  {
+    *z -= 1 << 26;
+  }
 }
 
 void readString(char *data, size_t maxlen)

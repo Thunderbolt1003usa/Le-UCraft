@@ -55,7 +55,7 @@ void readStart(player_t *player);
 uint8_t readPeekByte();
 uint8_t readByte();
 void readBuffer(char *buffer, size_t size);
-uint16_t readShort();
+int16_t readShort();
 double readDouble();
 float readFloat();
 int64_t readLong();

@@ -1,6 +1,13 @@
-// Block mappings for 26.1.2
-#ifndef _BLOCKS_H
-#define _BLOCKS_H
+/*
+ * Auto-generated block default-state enum values.
+ * Generated from:
+ *   - generated/reports/blocks.json
+ *
+ * Maps block enum names to their Minecraft default block-state IDs.
+ * Version: 26.1.2
+ */
+#ifndef _BLOCK_STATES_H
+#define _BLOCK_STATES_H
 
 typedef enum blocksDefaultState
 {
