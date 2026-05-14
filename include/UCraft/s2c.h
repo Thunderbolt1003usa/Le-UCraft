@@ -2,8 +2,9 @@
 #define _S2C_H
 #include "socketio.h"
 #include "enums.h"
-#include "blocks/blocks.h"
+#include "blocks/block_states.h"
 #include "world.h"
+#include "storage.h"
 
 typedef enum S2CPlayPacketId
 {
@@ -205,13 +206,15 @@ void PlayS2Csysmessage(char *message,
                        size_t len);
 void PlayS2Centitydestroy(int32_t eid);
 void PlayS2Cblock(blocksDefaultState blockstate, int32_t x, int32_t y, int32_t z);
-void PlayS2Cblockbreak(player_t *currentPlayer, int32_t sequence);
+void PlayS2Cblockchangeack(player_t *currentPlayer, int32_t sequence);
 void PlayS2Cbossbar(player_t *currentPlayer, uint16_t uuid, int32_t action,
                     char *title, size_t len, float health);
 void PlayS2Centitydata(player_t *currentPlayer, uint8_t entity, EntityDataMetadata type, EntityState state);
 void PlayS2Ccompassposition(player_t *currentPlayer, int32_t x, int32_t y, int32_t z);
 void PlayS2Cdisconnect(player_t *currentPlayer, char *reason);
 void PlayS2Csettime(int64_t time_of_day, uint8_t time_of_day_increasing);
+void PlayS2Ccontainersetcontent(player_t *currentPlayer, storage_t *inventory);
+
 void ConfigurationS2Cfeatures();
 void ConfigurationS2Cknownpacks();
 void ConfigurationS2Cregistry();

@@ -434,6 +434,7 @@ static void s2cHandler()
                 }
                 currentPlayer->entity_action_event = 0;
             }
+            gamePlayerGlobalTickOthers(currentPlayer);
             currentPlayer->global_buffer_end_index = sendGetGlobalBufferIndex();
             // Code below will brodcast to current player and the rest of the players while above will be for other players only
             if (currentPlayer->chat_event)
@@ -679,6 +680,7 @@ int UCraftStart(uint8_t *cleanup_flag)
         }
         main_tick++;
     }
+    gameCleanup();
     UCraftCleanup();
     return 0;
 }

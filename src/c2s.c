@@ -1,4 +1,6 @@
 #include "c2s.h"
+#include "storage.h"
+#include "blocks/block_states.h"
 
 static void PlayC2S_accept_teleportation(player_t *currentPlayer) {}
 static void PlayC2S_attack(player_t *currentPlayer) {}
@@ -83,8 +85,45 @@ static void PlayC2S_client_information(player_t *currentPlayer)
 static void PlayC2S_command_suggestion(player_t *currentPlayer) {}
 static void PlayC2S_configuration_acknowledged(player_t *currentPlayer) {}
 static void PlayC2S_container_button_click(player_t *currentPlayer) {}
-static void PlayC2S_container_click(player_t *currentPlayer) {}
-static void PlayC2S_container_close(player_t *currentPlayer) {}
+static void PlayC2S_container_click(player_t *currentPlayer)
+{
+    int32_t window_id = readVarInt();
+    readVarInt(); // State ID
+    readShort();  // Slot
+    readByte();   // Button
+    readVarInt(); // Mode
+    int16_t changed_slots = readVarInt();
+    if (window_id == 0)
+    {
+        if (changed_slots > 0 && changed_slots <= INVENTORY_SIZE)
+        {
+            for (int i = 0; i < changed_slots; i++)
+            {
+                int16_t slot_num = readShort();
+                if (readByte())
+                { // Has Item
+                    int32_t item_id = readVarInt();
+                    int32_t item_count = readVarInt();
+                    storageInventoryUpdateSlot(currentPlayer, slot_num, item_count, item_id);
+                    readByte(); // Components to add
+                    readByte(); // Components to remove
+                }
+                else
+                {
+                    storageInventoryUpdateSlot(currentPlayer, slot_num, 0, 0);
+                }
+            }
+        }
+    }
+}
+static void PlayC2S_container_close(player_t *currentPlayer)
+{
+
+    if (readVarInt() == 0)
+    { // Window ID
+        currentPlayer->gamePlayerData.full_inventory_update_event = 1;
+    }
+}
 static void PlayC2S_container_slot_state_changed(player_t *currentPlayer) {}
 static void PlayC2S_cookie_response(player_t *currentPlayer) {}
 static void PlayC2S_custom_payload(player_t *currentPlayer) {}
@@ -131,7 +170,17 @@ static void PlayC2S_pick_item_from_entity(player_t *currentPlayer) {}
 static void PlayC2S_ping_request(player_t *currentPlayer) {}
 static void PlayC2S_place_recipe(player_t *currentPlayer) {}
 static void PlayC2S_player_abilities(player_t *currentPlayer) {}
-static void PlayC2S_player_action(player_t *currentPlayer) {}
+static void PlayC2S_player_action(player_t *currentPlayer)
+{
+    if (readVarInt() == 2) // Status
+    {
+        currentPlayer->gamePlayerData.block_state = MINECRAFT_AIR;
+        readPosition(&currentPlayer->gamePlayerData.block_x, &currentPlayer->gamePlayerData.block_y, &currentPlayer->gamePlayerData.block_z); // Location
+        currentPlayer->gamePlayerData.block_face = readByte();                                                                                // Face
+        currentPlayer->gamePlayerData.block_sequence = readVarInt();                                                                          // Sequence
+        currentPlayer->gamePlayerData.action_item_event = 1;
+    }
+}
 static void PlayC2S_player_command(player_t *currentPlayer) {}
 static void PlayC2S_player_input(player_t *currentPlayer)
 {
@@ -147,7 +196,14 @@ static void PlayC2S_resource_pack(player_t *currentPlayer) {}
 static void PlayC2S_seen_advancements(player_t *currentPlayer) {}
 static void PlayC2S_select_trade(player_t *currentPlayer) {}
 static void PlayC2S_set_beacon(player_t *currentPlayer) {}
-static void PlayC2S_set_carried_item(player_t *currentPlayer) {}
+static void PlayC2S_set_carried_item(player_t *currentPlayer)
+{
+    int16_t slot = readShort();
+    if (slot >= 0 && slot <= 9)
+    {
+        currentPlayer->gamePlayerData.inventory_slot = slot;
+    }
+}
 static void PlayC2S_set_command_block(player_t *currentPlayer) {}
 static void PlayC2S_set_command_minecart(player_t *currentPlayer) {}
 static void PlayC2S_set_creative_mode_slot(player_t *currentPlayer) {}
@@ -164,7 +220,48 @@ static void PlayC2S_swing(player_t *currentPlayer)
 }
 static void PlayC2S_teleport_to_entity(player_t *currentPlayer) {}
 static void PlayC2S_test_instance_block_action(player_t *currentPlayer) {}
-static void PlayC2S_use_item_on(player_t *currentPlayer) {}
+static void PlayC2S_use_item_on(player_t *currentPlayer)
+{
+    readVarInt();                                                                                                                         // Hand
+    readPosition(&currentPlayer->gamePlayerData.block_x, &currentPlayer->gamePlayerData.block_y, &currentPlayer->gamePlayerData.block_z); // Location
+    currentPlayer->gamePlayerData.block_face = readVarInt();                                                                              // Face
+    switch (currentPlayer->gamePlayerData.block_face)
+    {
+    case 0:
+        currentPlayer->gamePlayerData.block_y--;
+        break;
+
+    case 1:
+        currentPlayer->gamePlayerData.block_y++;
+        break;
+
+    case 2:
+        currentPlayer->gamePlayerData.block_z--;
+        break;
+
+    case 3:
+        currentPlayer->gamePlayerData.block_z++;
+        break;
+
+    case 4:
+        currentPlayer->gamePlayerData.block_x--;
+        break;
+
+    case 5:
+        currentPlayer->gamePlayerData.block_x++;
+        break;
+    default:
+        break;
+    }
+
+    readFloat();                                                 // Cursor Position X
+    readFloat();                                                 // Cursor Position Y
+    readFloat();                                                 // Cursor Position Z
+    readByte();                                                  // Inside block
+    readByte();                                                  // World Border Hit
+    currentPlayer->gamePlayerData.block_sequence = readVarInt(); // Sequence
+    currentPlayer->gamePlayerData.action_item_event = 2;
+}
 static void PlayC2S_use_item(player_t *currentPlayer) {}
 static void PlayC2S_custom_click_action(player_t *currentPlayer) {}
 

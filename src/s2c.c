@@ -7,6 +7,7 @@
 #include "encryption.h"
 #include "wrapper.h"
 #include "util.h"
+#include "blocks.h"
 
 #ifdef ONLINE_MODE
 #include "mbedtls/base64.h"
@@ -269,6 +270,7 @@ void PlayS2Cchunkcenter(player_t *currentPlayer, int32_t x, int32_t z)
 }
 void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, int32_t to)
 {
+
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_LEVEL_CHUNK_WITH_LIGHT);
   sendInt(x);
@@ -303,6 +305,15 @@ void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, i
   }
   sendVarInt(0); // Block Light array count
   sendDone();
+
+  Blocks *blocks = blocksGet(x, z);
+  if (blocks != NULL)
+  {
+    for (size_t i = 0; i < blocks->count; i++)
+    {
+      PlayS2Cblock(blocks->block[i].default_state, blocks->block[i].c.x + (x << 4), blocks->block[i].c.y, blocks->block[i].c.z + (z << 4));
+    }
+  }
 }
 void PlayS2Cheartbeat(player_t *currentPlayer)
 {
@@ -392,7 +403,7 @@ void PlayS2Cblock(blocksDefaultState blockstate, int32_t x, int32_t y, int32_t z
   sendDone();
 }
 // Acknowledge Block Change
-void PlayS2Cblockbreak(player_t *currentPlayer, int32_t sequence)
+void PlayS2Cblockchangeack(player_t *currentPlayer, int32_t sequence)
 {
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_BLOCK_CHANGED_ACK);
@@ -494,6 +505,27 @@ void PlayS2Csettime(int64_t time_of_day, uint8_t time_of_day_increasing)
   sendPlayPacketHeader(S2C_PLAY_SET_TIME);
   sendLong(time_of_day);
   sendByte(time_of_day_increasing ? 1 : 0);
+  sendDone();
+}
+
+void PlayS2Ccontainersetcontent(player_t *currentPlayer, storage_t *inventory)
+{
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_CONTAINER_SET_CONTENT);
+  sendVarInt(0); // Window ID
+  sendVarInt(0); // State ID
+  sendVarInt(INVENTORY_SIZE);
+  for (int i = 0; i < INVENTORY_SIZE; i++)
+  {
+    sendVarInt(inventory->inventory_slots[i].count); // Item count
+    if (inventory->inventory_slots[i].count != 0)
+    {
+      sendVarInt(inventory->inventory_slots[i].item_id); // Item ID
+      sendVarInt(0);                                     // Add Data component array
+      sendVarInt(0);                                     // Remove  Data component array
+    }
+  }
+  sendVarInt(0); // Dragged by mouse Item Count
   sendDone();
 }
 void ConfigurationS2Cfeatures()

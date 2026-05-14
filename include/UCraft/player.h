@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "game.h"
-typedef struct gamePlayerData_t gamePlayerData_t;
+typedef struct game_player_data_t game_player_data_t;
 typedef struct player_t player_t;
 typedef struct out_packet_t out_packet_t;
 
@@ -100,7 +100,7 @@ struct player_t
   size_t global_buffer_start_index;
   size_t global_buffer_end_index;
   // Game
-  gamePlayerData_t gamePlayerData;
+  game_player_data_t gamePlayerData;
   // Private
   struct player_t *next;
 };
