@@ -93,24 +93,48 @@ static void PlayC2S_container_click(player_t *currentPlayer)
     readByte();   // Button
     readVarInt(); // Mode
     int16_t changed_slots = readVarInt();
-    if (window_id == 0)
+    if (changed_slots > 0 && changed_slots <= INVENTORY_SIZE)
     {
-        if (changed_slots > 0 && changed_slots <= INVENTORY_SIZE)
+        for (int i = 0; i < changed_slots; i++)
         {
-            for (int i = 0; i < changed_slots; i++)
+            int16_t slot_num = readShort();
+            if (slot_num < INVENTORY_SIZE)
             {
-                int16_t slot_num = readShort();
-                if (readByte())
-                { // Has Item
-                    int32_t item_id = readVarInt();
-                    int32_t item_count = readVarInt();
-                    storageInventoryUpdateSlot(currentPlayer, slot_num, item_count, item_id);
-                    readByte(); // Components to add
-                    readByte(); // Components to remove
-                }
-                else
+                if (window_id == 0) // player inventory
                 {
-                    storageInventoryUpdateSlot(currentPlayer, slot_num, 0, 0);
+                    if (readByte()) // Has Item
+                    {
+                        int32_t item_id = readVarInt();
+                        int32_t item_count = readVarInt();
+                        readByte(); // Components to add
+                        readByte(); // Components to remove
+                        storageInventoryUpdateSlot(currentPlayer, slot_num, item_count, item_id);
+                    }
+                    else
+                    {
+                        storageInventoryUpdateSlot(currentPlayer, slot_num, 0, 0);
+                    }
+                }
+                else if ((window_id == 1) && currentPlayer->gamePlayerData.crafting_menu) // crafting menu
+                {
+                    if (readByte()) // Has Item
+                    {
+                        int32_t item_id = readVarInt();
+                        int32_t item_count = readVarInt();
+                        readByte(); // Components to add
+                        readByte(); // Components to remove
+                        currentPlayer->gamePlayerData.crafting_menu[slot_num].count = item_count;
+                        currentPlayer->gamePlayerData.crafting_menu[slot_num].item_id = item_id;
+                    }
+                    else
+                    {
+                        currentPlayer->gamePlayerData.crafting_menu[slot_num].count = 0;
+                        currentPlayer->gamePlayerData.crafting_menu[slot_num].item_id = 0;
+                    }
+                    if (slot_num > 0 && slot_num <= 9)
+                    {
+                        currentPlayer->gamePlayerData.crafting_table_event = 1;
+                    }
                 }
             }
         }
@@ -118,11 +142,45 @@ static void PlayC2S_container_click(player_t *currentPlayer)
 }
 static void PlayC2S_container_close(player_t *currentPlayer)
 {
-
-    if (readVarInt() == 0)
-    { // Window ID
-        currentPlayer->gamePlayerData.full_inventory_update_event = 1;
+    int32_t window_id = readVarInt(); // Window ID
+    if (window_id == 1)
+    {
+        if (currentPlayer->gamePlayerData.crafting_menu)
+        {
+            storage_t *inventory = storageInventoryGet(currentPlayer);
+            // restore the inventory
+            inventory_slots_t armor[4];
+            // copy the armor
+            for (int i = 0; i < 4; i++)
+            {
+                armor[i].count = inventory->inventory_slots[i + 5].count;
+                armor[i].item_id = inventory->inventory_slots[i + 5].item_id;
+            }
+            memset(inventory->inventory_slots, 0, sizeof(inventory_slots_t) * INVENTORY_SIZE);
+            for (int i = 10; i < INVENTORY_SIZE; i++)
+            {
+                inventory->inventory_slots[i - 1].item_id = currentPlayer->gamePlayerData.crafting_menu[i].item_id;
+                inventory->inventory_slots[i - 1].count = currentPlayer->gamePlayerData.crafting_menu[i].count;
+            }
+            // the stuff in the crafting grid must be re-inserted back in the inventory
+            for (int i = 1; i <= 9; i++)
+            {
+                if (currentPlayer->gamePlayerData.crafting_menu[i].item_id)
+                {
+                    storageInventoryInsertItem(currentPlayer, currentPlayer->gamePlayerData.crafting_menu[i].item_id, currentPlayer->gamePlayerData.crafting_menu[i].count);
+                }
+            }
+            // restore armor
+            for (int i = 0; i < 4; i++)
+            {
+                inventory->inventory_slots[i + 5].count = armor[i].count;
+                inventory->inventory_slots[i + 5].item_id = armor[i].item_id;
+            }
+            U_free(currentPlayer->gamePlayerData.crafting_menu);
+            currentPlayer->gamePlayerData.crafting_menu = NULL;
+        }
     }
+    currentPlayer->gamePlayerData.full_inventory_update_event = 1;
 }
 static void PlayC2S_container_slot_state_changed(player_t *currentPlayer) {}
 static void PlayC2S_cookie_response(player_t *currentPlayer) {}
@@ -225,34 +283,6 @@ static void PlayC2S_use_item_on(player_t *currentPlayer)
     readVarInt();                                                                                                                         // Hand
     readPosition(&currentPlayer->gamePlayerData.block_x, &currentPlayer->gamePlayerData.block_y, &currentPlayer->gamePlayerData.block_z); // Location
     currentPlayer->gamePlayerData.block_face = readVarInt();                                                                              // Face
-    switch (currentPlayer->gamePlayerData.block_face)
-    {
-    case 0:
-        currentPlayer->gamePlayerData.block_y--;
-        break;
-
-    case 1:
-        currentPlayer->gamePlayerData.block_y++;
-        break;
-
-    case 2:
-        currentPlayer->gamePlayerData.block_z--;
-        break;
-
-    case 3:
-        currentPlayer->gamePlayerData.block_z++;
-        break;
-
-    case 4:
-        currentPlayer->gamePlayerData.block_x--;
-        break;
-
-    case 5:
-        currentPlayer->gamePlayerData.block_x++;
-        break;
-    default:
-        break;
-    }
 
     readFloat();                                                 // Cursor Position X
     readFloat();                                                 // Cursor Position Y

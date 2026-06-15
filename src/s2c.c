@@ -372,17 +372,9 @@ void PlayS2Centityanimation(player_t *currentPlayer, uint8_t animation)
 
 void PlayS2Csysmessage(char *message, size_t len)
 {
-  static const unsigned char NBT_text[] = {
-      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74};
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_SYSTEM_CHAT);
-  sendBuffer((char *)NBT_text, sizeof(NBT_text));
-  sendShort(len);
-  for (uint32_t i = 0; i < len; i++)
-  {
-    sendByte(message[i]);
-  }
-  sendByte(0);
+  sendFormattedString(message, len);
   sendByte(0);
   sendDone();
 }
@@ -485,18 +477,10 @@ void PlayS2Ccompassposition(player_t *currentPlayer, int32_t x, int32_t y, int32
 }
 void PlayS2Cdisconnect(player_t *currentPlayer, char *reason)
 {
-  static const unsigned char NBT_text[] = {
-      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74};
   size_t len = strnlen(reason, sizeof(((player_t *)0)->disconnect_reason));
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_DISCONNECT);
-  sendBuffer((char *)NBT_text, sizeof(NBT_text));
-  sendShort(len);
-  for (uint32_t i = 0; i < len; i++)
-  {
-    sendByte(reason[i]);
-  }
-  sendByte(0);
+  sendFormattedString(reason, len);
   sendDone();
 }
 void PlayS2Csettime(int64_t time_of_day, uint8_t time_of_day_increasing)
@@ -526,6 +510,34 @@ void PlayS2Ccontainersetcontent(player_t *currentPlayer, storage_t *inventory)
     }
   }
   sendVarInt(0); // Dragged by mouse Item Count
+  sendDone();
+}
+
+void PlayS2Ccontainersetslot(player_t *currentPlayer, int32_t window_id, int16_t slot, int16_t count, int32_t item_id)
+{
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_CONTAINER_SET_SLOT);
+  sendVarInt(window_id); // window id
+  sendVarInt(0);         // State ID
+  sendShort(slot);       // Slot
+  sendVarInt(count);     // Item count
+  if (count)
+  {
+    sendVarInt(item_id);
+    sendVarInt(0);
+    sendVarInt(0);
+  }
+  sendDone();
+}
+
+void PlayS2Copenscreen(player_t *currentPlayer, int32_t window_id, int32_t window_type, char *window_title)
+{
+
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_OPEN_SCREEN);
+  sendVarInt(window_id);
+  sendVarInt(window_type);
+  sendFormattedString(window_title, -1);
   sendDone();
 }
 void ConfigurationS2Cfeatures()

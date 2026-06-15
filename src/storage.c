@@ -51,16 +51,6 @@ static storage_t *get_storage(player_t *currentPlayer)
     return storage;
 }
 
-void storageInventoryUpdate(player_t *currentPlayer)
-{
-    if (currentPlayer == NULL)
-    {
-        return;
-    }
-    storage_t *storage = get_storage(currentPlayer);
-    PlayS2Ccontainersetcontent(currentPlayer, storage);
-}
-
 void storageInventoryUpdateSlot(player_t *currentPlayer, int16_t slot, int16_t count, int32_t item_id)
 {
     if (currentPlayer == NULL)
@@ -175,6 +165,31 @@ void storageInventoryInsertItem(player_t *currentPlayer, int32_t item_id, int16_
     // TODO: implement the case when inventory is full
 }
 
+void storageInventoryUpdate(player_t *currentPlayer)
+{
+    if (currentPlayer == NULL)
+    {
+        return;
+    }
+    storage_t *storage = get_storage(currentPlayer);
+    // crafting entries cannot be there
+    for (int i = 1; i <= 4; i++)
+    {
+        storageInventoryInsertItem(currentPlayer, storage->inventory_slots[i].item_id, storage->inventory_slots[i].count);
+        storage->inventory_slots[i].item_id = 0;
+        storage->inventory_slots[i].count = 0;
+    }
+    PlayS2Ccontainersetcontent(currentPlayer, storage);
+}
+
+storage_t *storageInventoryGet(player_t *currentPlayer)
+{
+    if (currentPlayer == NULL)
+    {
+        return NULL;
+    }
+    return get_storage(currentPlayer);
+}
 void storageInventoryCleanup()
 {
     storage_t *storage = storageHead;

@@ -291,7 +291,7 @@ static void s2cHandler()
         {
             // printl(LOG_INFO,"player %d ingame\n",currentPlayer->player_id);
             sendRevertFromGlobalBuffer();
-            if ((main_tick % 1000) == 0)
+            if ((main_tick % 9000) == 0)
             {
                 if (currentPlayer->heartbeat == 0)
                 {
@@ -427,10 +427,12 @@ static void s2cHandler()
                 if (currentPlayer->entity_action_id & 0x20)
                 {
                     PlayS2Centitydata(currentPlayer, ENTITY_POSE, ENTITY_DATA_POSE, STATE_SNEAKING);
+                    currentPlayer->sneaking = 1;
                 }
                 else
                 {
                     PlayS2Centitydata(currentPlayer, ENTITY_POSE, ENTITY_DATA_POSE, STATE_STANDING);
+                    currentPlayer->sneaking = 0;
                 }
                 currentPlayer->entity_action_event = 0;
             }

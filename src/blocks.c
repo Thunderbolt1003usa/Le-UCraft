@@ -338,7 +338,7 @@ Blocks *blocksGet(int32_t chunk_x, int32_t chunk_z)
     return blocks;
 }
 
-int blocksGetBlock(int32_t x, int16_t y, int32_t z)
+int32_t blocksGetBlock(int32_t x, int16_t y, int32_t z)
 {
     int32_t chunk_x = x >> 4;
     int32_t chunk_z = z >> 4;

@@ -94,6 +94,7 @@ void sendDone();
 void sendVarInt(int32_t value);
 void sendPosition(int32_t x, int32_t y, int32_t z);
 void sendString(const char *str, size_t len);
+void sendFormattedString(const char *str, size_t len);
 void sendUUID(uint16_t seed);
 void sendUUIDString(uint16_t seed);
 void socketioCleanup();

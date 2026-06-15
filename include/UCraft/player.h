@@ -58,6 +58,7 @@ struct player_t
   uint8_t logged_on : 1;
   uint8_t active : 1;
   uint8_t onground : 1;
+  uint8_t sneaking : 1;
   uint8_t heartbeat : 1;
   // Events
   uint8_t chat_event : 1;

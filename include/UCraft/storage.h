@@ -27,6 +27,7 @@ void storageInventoryUpdate(player_t *currentPlayer);
 void storageInventoryUpdateSlot(player_t *currentPlayer, int16_t slot, int16_t count, int32_t item_id);
 void storageInventoryGetSlot(player_t *currentPlayer, int16_t slot, inventory_slots_t *selected_slot);
 void storageInventoryInsertItem(player_t *currentPlayer, int32_t item_id, int16_t count);
+storage_t *storageInventoryGet(player_t *currentPlayer);
 void storageInventoryCleanup();
 
 #endif

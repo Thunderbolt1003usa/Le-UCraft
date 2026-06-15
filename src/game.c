@@ -5,10 +5,10 @@
 #include "log.h"
 #include "s2c.h"
 #include "wrapper.h"
-#include "UCraft.h"
-#include "storage.h"
 #include "blocks.h"
 #include "blocks/items.h"
+#include "UCraft.h"
+#include "recipes.h"
 
 static game_data_t gameData;
 
@@ -28,6 +28,11 @@ void gameCleanup()
 // fired when a player leaves
 void gamePlayerLeft(player_t *currentPlayer)
 {
+    if (currentPlayer->gamePlayerData.crafting_menu)
+    {
+        U_free(currentPlayer->gamePlayerData.crafting_menu);
+        currentPlayer->gamePlayerData.crafting_menu = NULL;
+    }
 }
 // fired every tick in the global context
 // NOTE: this will run even if there are no players so be careful when sending packets
@@ -196,10 +201,54 @@ void gamePlayerLocalTick(player_t *currentPlayer)
         storageInventoryUpdate(currentPlayer);
         currentPlayer->gamePlayerData.full_inventory_update_event = 0;
     }
-    // crafting event
+    // crafting table event
+    if (currentPlayer->gamePlayerData.crafting_table_event)
+    {
+        if (currentPlayer->gamePlayerData.crafting_menu)
+        {
+            inventory_slots_t slots[9];
+            memset(&slots, 0, sizeof(slots));
+            for (int i = 1; i <= 9; i++)
+            {
+                if (currentPlayer->gamePlayerData.crafting_menu[i].item_id)
+                {
+                    slots[i - 1].item_id = currentPlayer->gamePlayerData.crafting_menu[i].item_id;
+                    slots[i - 1].count = currentPlayer->gamePlayerData.crafting_menu[i].count;
+                }
+            }
+            size_t count = 0;
+            int32_t crafted_item = get_crafted_item(currentPlayer, slots, &count);
+            PlayS2Ccontainersetslot(currentPlayer, 1, 0, count, crafted_item);
+        }
+        currentPlayer->gamePlayerData.crafting_table_event = 0;
+    }
+    // inventory crafting event
     if (currentPlayer->gamePlayerData.inventory_crafting_event)
     {
-        printf("crafting event!\n");
+        inventory_slots_t slots[9];
+        memset(&slots, 0, sizeof(slots));
+        size_t index = 0;
+        for (int i = 1; i < 5; i++)
+        {
+            inventory_slots_t slot;
+            storageInventoryGetSlot(currentPlayer, i, &slot);
+            if (slot.item_id)
+            {
+                slots[index].count = slot.count;
+                slots[index].item_id = slot.item_id;
+            }
+            if (i > 1 && i < 3)
+            {
+                index += 2;
+            }
+            else
+            {
+                index++;
+            }
+        }
+        size_t count = 0;
+        int32_t crafted_item = get_crafted_item(currentPlayer, slots, &count);
+        PlayS2Ccontainersetslot(currentPlayer, 0, 0, count, crafted_item);
         currentPlayer->gamePlayerData.inventory_crafting_event = 0;
     }
     // blocks
@@ -207,26 +256,75 @@ void gamePlayerLocalTick(player_t *currentPlayer)
     {
         inventory_slots_t slot;
         storageInventoryGetSlot(currentPlayer, 36 + currentPlayer->gamePlayerData.inventory_slot, &slot);
+        int32_t block = blocksGetBlock(currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
         if (currentPlayer->gamePlayerData.action_item_event == 2) // block placing event
         {
 
-            currentPlayer->gamePlayerData.block_state = minecraft_block_state_from_item(slot.item_id);
-            if (currentPlayer->gamePlayerData.block_state)
+            // 3x3 crafitng state
+            if (block == MINECRAFT_CRAFTING_TABLE && currentPlayer->sneaking != 1)
             {
-                if (slot.count)
+                if (currentPlayer->gamePlayerData.crafting_menu == NULL)
                 {
-                    slot.count--;
-                    storageInventoryUpdateSlot(currentPlayer, 36 + currentPlayer->gamePlayerData.inventory_slot, slot.count, slot.item_id);
-                    storageInventoryUpdate(currentPlayer);
+                    currentPlayer->gamePlayerData.crafting_menu = U_calloc(INVENTORY_SIZE, sizeof(inventory_slots_t));
+                    storage_t *inventory = storageInventoryGet(currentPlayer);
+                    // copy the inventory according to the crafting table mapping
+                    for (int i = 10; i < INVENTORY_SIZE; i++)
+                    {
+                        currentPlayer->gamePlayerData.crafting_menu[i].item_id = inventory->inventory_slots[i - 1].item_id;
+                        currentPlayer->gamePlayerData.crafting_menu[i].count = inventory->inventory_slots[i - 1].count;
+                    }
                 }
-                blocksUpdate(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
-                PlayS2Cblock(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
-                PlayS2Cblockchangeack(currentPlayer, currentPlayer->gamePlayerData.block_sequence);
+
+                PlayS2Copenscreen(currentPlayer, 1, 12, "Crafting");
+            }
+            else
+            {
+                currentPlayer->gamePlayerData.block_state = minecraft_block_state_from_item(slot.item_id);
+                if (currentPlayer->gamePlayerData.block_state)
+                {
+                    if (slot.count)
+                    {
+                        slot.count--;
+                        storageInventoryUpdateSlot(currentPlayer, 36 + currentPlayer->gamePlayerData.inventory_slot, slot.count, slot.item_id);
+                        storageInventoryUpdate(currentPlayer);
+                    }
+                    switch (currentPlayer->gamePlayerData.block_face)
+                    {
+                    case 0:
+                        currentPlayer->gamePlayerData.block_y--;
+                        break;
+
+                    case 1:
+                        currentPlayer->gamePlayerData.block_y++;
+                        break;
+
+                    case 2:
+                        currentPlayer->gamePlayerData.block_z--;
+                        break;
+
+                    case 3:
+                        currentPlayer->gamePlayerData.block_z++;
+                        break;
+
+                    case 4:
+                        currentPlayer->gamePlayerData.block_x--;
+                        break;
+
+                    case 5:
+                        currentPlayer->gamePlayerData.block_x++;
+                        break;
+                    default:
+                        break;
+                    }
+                    blocksUpdate(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+                    PlayS2Cblock(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+                    PlayS2Cblockchangeack(currentPlayer, currentPlayer->gamePlayerData.block_sequence);
+                }
             }
         }
         else if (currentPlayer->gamePlayerData.action_item_event == 1) // block breaking
         {
-            int32_t item_broken = minecraft_item_from_block_state(blocksGetBlock(currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z));
+            int32_t item_broken = minecraft_item_from_block_state(block);
             // verify the entry
             static const int32_t tools[] = {MINECRAFT_WOODEN_PICKAXE_ITEM, MINECRAFT_STONE_PICKAXE_ITEM, MINECRAFT_IRON_PICKAXE_ITEM, MINECRAFT_DIAMOND_PICKAXE_ITEM};
             switch (item_broken)

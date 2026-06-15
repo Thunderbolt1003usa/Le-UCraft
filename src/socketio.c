@@ -946,6 +946,12 @@ void sendPosition(int32_t x, int32_t y, int32_t z)
 }
 void sendString(const char *str, size_t len)
 {
+  if (str == NULL)
+  {
+    printl(LOG_ERROR, "Send string failed! string is null!\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
   if (len == (size_t)(-1))
   {
     len = strnlen(str, MAX_STRING_SIZE);
@@ -961,6 +967,34 @@ void sendString(const char *str, size_t len)
   {
     sendByte(str[i]);
   }
+}
+void sendFormattedString(const char *str, size_t len)
+{
+  static const unsigned char NBT_text[] = {
+      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74};
+  if (str == NULL)
+  {
+    printl(LOG_ERROR, "Send formatted string failed! string is null!\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  if (len == (size_t)(-1))
+  {
+    len = strnlen(str, MAX_STRING_SIZE);
+  }
+  if (len > MAX_STRING_SIZE)
+  {
+    printl(LOG_ERROR, "Send formatted string failed! len(%ld) > %ld\n", len, (size_t)MAX_STRING_SIZE);
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  sendBuffer((char *)NBT_text, sizeof(NBT_text));
+  sendShort(len);
+  for (uint32_t i = 0; i < len; i++)
+  {
+    sendByte(str[i]);
+  }
+  sendByte(0);
 }
 // TODO: both of these are not correctly implemented but its random right?
 void sendUUID(uint16_t seed)
