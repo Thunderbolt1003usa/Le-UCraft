@@ -115,7 +115,7 @@ int httpsConnect(player_t *currentPlayer, const char *hostname, const char *port
         return 1;
     }
     ret = U_setsocknonblock(httpsData.net.fd);
-    if (ret != 0)
+    if (ret < 0)
     {
         printl(LOG_ERROR, "U_setsocknonblock returned %d\n", ret);
         return 1;
@@ -126,7 +126,7 @@ int httpsConnect(player_t *currentPlayer, const char *hostname, const char *port
     if (auth_server.sin_addr.s_addr == 0)
     {
         struct hostent *hostinfo = U_gethostbyname(hostname);
-        if (!hostinfo)
+        if (hostinfo == NULL)
         {
             printl(LOG_ERROR, "U_gethostbyname Failed\r\n");
             return 1;

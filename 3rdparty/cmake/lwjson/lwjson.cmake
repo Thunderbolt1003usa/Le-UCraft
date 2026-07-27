@@ -13,7 +13,7 @@ if(NOT EXISTS "${UCRAFT_LWJSON_SOURCE_DIR}/src/lwjson/lwjson.c")
     find_package(Git REQUIRED)
     execute_process(
         COMMAND ${GIT_EXECUTABLE} submodule update --init --recursive 3rdparty/lwjson
-        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/../../..
     )
 endif()
 
