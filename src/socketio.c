@@ -44,13 +44,8 @@ void readBuffer(char *buffer, size_t size)
 int16_t readShort()
 {
   int16_t ret = 0;
-#if (ENDIAN)
   ret |= readByte() << 8;
   ret |= readByte();
-#else
-  ret |= readByte();
-  ret |= readByte() << 8;
-#endif
   return ret;
 }
 double readDouble()
