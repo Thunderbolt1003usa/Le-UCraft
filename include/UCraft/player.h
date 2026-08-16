@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "game.h"
-typedef struct gamePlayerData_t gamePlayerData_t;
+typedef struct game_player_data_t game_player_data_t;
 typedef struct player_t player_t;
 typedef struct out_packet_t out_packet_t;
 
@@ -58,16 +58,15 @@ struct player_t
   uint8_t logged_on : 1;
   uint8_t active : 1;
   uint8_t onground : 1;
+  uint8_t sneaking : 1;
   uint8_t heartbeat : 1;
   // Events
   uint8_t chat_event : 1;
   uint8_t ping_event : 1;
   uint8_t login_event : 1;
   uint8_t spawn_event : 1;
-  uint8_t chunk_loaded_event : 1;
   uint8_t playerlist_event : 1;
-  uint8_t compression_event : 1;
-  uint8_t chunk_next_event : 1;
+  uint8_t compression_flag : 1;
   uint8_t remove_player_event : 1;
   uint8_t configuration_event : 1;
   uint8_t configuration_known_packs_ack_event : 1;
@@ -101,9 +100,8 @@ struct player_t
   uint8_t ability;
   size_t global_buffer_start_index;
   size_t global_buffer_end_index;
-  size_t loaded_chunks;
   // Game
-  gamePlayerData_t gamePlayerData;
+  game_player_data_t gamePlayerData;
   // Private
   struct player_t *next;
 };

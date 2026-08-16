@@ -7,11 +7,11 @@
 #include "encryption.h"
 #include "wrapper.h"
 #include "util.h"
+#include "blocks.h"
+
 #ifdef ONLINE_MODE
 #include "mbedtls/base64.h"
 #endif /*ONLINE_MODE*/
-
-extern int main_tick;
 
 // Status packets
 void StatusS2Cresponse(player_t *currentPlayer)
@@ -97,7 +97,7 @@ void LoginS2Ccompression(player_t *currentPlayer)
   sendByte(0x3);
   sendVarInt(COMPRESSION_THRESHOLD);
   sendDone();
-  currentPlayer->compression_event = 1;
+  currentPlayer->compression_flag = 1;
 }
 void LoginS2Csuccess(player_t *currentPlayer)
 {
@@ -230,9 +230,9 @@ void PlayS2Cspawnentity(player_t *currentPlayer, EntityMetadataType type)
 {
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_ADD_ENTITY);
-  sendVarInt(currentPlayer->id); //EID
-  sendUUID(currentPlayer->id); //UUID
-  sendVarInt(type); //Entity Type
+  sendVarInt(currentPlayer->id); // EID
+  sendUUID(currentPlayer->id);   // UUID
+  sendVarInt(type);              // Entity Type
   sendDouble(0);
   sendDouble(0);
   sendDouble(0);
@@ -268,49 +268,56 @@ void PlayS2Cchunkcenter(player_t *currentPlayer, int32_t x, int32_t z)
   sendVarInt(z);
   sendDone();
 }
-void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z)
+void PlayS2Cchunk(player_t *currentPlayer, int32_t x, int32_t z, int32_t from, int32_t to)
 {
-  // Thanks to bixilon(https://gitlab.bixilon.de/) for this minimal chunk
-  // generation!
-  char block_entity[256];
+
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_LEVEL_CHUNK_WITH_LIGHT);
   sendInt(x);
   sendInt(z);
   sendVarInt(0); // Heightmap count
-  // switch to another buffer so the size can be appended later on
-  sendSwitchToLocalBuffer(block_entity, sizeof(block_entity));
-  // this part of the chunk depends on the height and logical_height from the
-  // codec since section = logical_height/16 BUT for logical_height > 64
-  // something changes and the client expects the value to be <= 32 hence the
-  // chosen value
-  for (int i = 0; i < 32; i++)
-  {
-    sendShort(0);  // block count
-    sendByte(0);   // blocks singular
-    sendByte(0);   // block id
-    sendByte(0);   // biome singular
-    sendVarInt(0); // biome id
-  }
-  sendByte(0);
-  sendByte(0);
-  sendByte(0);
-  sendVarInt(0);
-  size_t len = sendRevertFromLocalBuffer();
-  sendVarInt(len);
-  sendBuffer(block_entity, len);
+  sendPrefixedStart();
+  worldGenerateChunk(x, z, from, to);
+  sendPrefixedEnd();
   sendVarInt(0); // block entiies
-  for (int i = 0; i < 4; i++)
-  { // Sky Light Mask,...
-    sendVarInt(1);
-    sendLong(0);
+  sendVarInt(1); // Sky Light Mask
+  const int light_section_count = to + 1;
+  const uint64_t light_mask = (light_section_count >= 64) ? UINT64_MAX : ((1ULL << light_section_count) - 1);
+  sendLong((int64_t)light_mask);
+  // Block Light Mask
+  sendVarInt(1);
+  sendLong(0);
+  // Empty Sky Light Mask
+  sendVarInt(1);
+  sendLong(0);
+  // Empty Block Light Mask
+  sendVarInt(1);
+  sendLong((int64_t)light_mask);
+
+  sendVarInt(light_section_count); // Sky Light array count
+  for (int i = 0; i < light_section_count; i++)
+  {
+    sendVarInt(2048);
+    for (int b = 0; b < 2048; b++)
+    {
+      sendByte(0xFF);
+    }
   }
-  sendVarInt(0); // Sky Light array count
   sendVarInt(0); // Block Light array count
   sendDone();
+
+  Blocks *blocks = blocksGet(x, z);
+  if (blocks != NULL)
+  {
+    for (size_t i = 0; i < blocks->count; i++)
+    {
+      PlayS2Cblock(blocks->block[i].default_state, blocks->block[i].c.x + (x << 4), blocks->block[i].c.y, blocks->block[i].c.z + (z << 4));
+    }
+  }
 }
 void PlayS2Cheartbeat(player_t *currentPlayer)
 {
+  extern size_t main_tick;
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_KEEP_ALIVE);
   sendLong(main_tick);
@@ -365,13 +372,9 @@ void PlayS2Centityanimation(player_t *currentPlayer, uint8_t animation)
 
 void PlayS2Csysmessage(char *message, size_t len)
 {
-  static const unsigned char NBT_text[9] = {
-      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74, 0x00};
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_SYSTEM_CHAT);
-  sendBuffer((char *)NBT_text, 9);
-  sendString(message, len);
-  sendByte(0);
+  sendFormattedString(message, len);
   sendByte(0);
   sendDone();
 }
@@ -392,7 +395,7 @@ void PlayS2Cblock(blocksDefaultState blockstate, int32_t x, int32_t y, int32_t z
   sendDone();
 }
 // Acknowledge Block Change
-void PlayS2Cblockbreak(player_t *currentPlayer, int32_t sequence)
+void PlayS2Cblockchangeack(player_t *currentPlayer, int32_t sequence)
 {
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_BLOCK_CHANGED_ACK);
@@ -466,7 +469,7 @@ void PlayS2Ccompassposition(player_t *currentPlayer, int32_t x, int32_t y, int32
 {
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_SET_DEFAULT_SPAWN_POSITION);
-  sendString("overworld",-1);
+  sendString("overworld", -1);
   sendPosition(x, y, z);
   sendFloat(0);
   sendFloat(0);
@@ -474,13 +477,67 @@ void PlayS2Ccompassposition(player_t *currentPlayer, int32_t x, int32_t y, int32
 }
 void PlayS2Cdisconnect(player_t *currentPlayer, char *reason)
 {
-  static const unsigned char NBT_text[9] = {
-      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74, 0x00};
+  size_t len = strnlen(reason, sizeof(((player_t *)0)->disconnect_reason));
   sendStart();
   sendPlayPacketHeader(S2C_PLAY_DISCONNECT);
-  sendBuffer((char *)NBT_text, 9);
-  sendString(reason, -1);
-  sendByte(0);
+  sendFormattedString(reason, len);
+  sendDone();
+}
+void PlayS2Csettime(int64_t time_of_day, uint8_t time_of_day_increasing)
+{
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_SET_TIME);
+  sendLong(time_of_day);
+  sendByte(time_of_day_increasing ? 1 : 0);
+  sendDone();
+}
+
+void PlayS2Ccontainersetcontent(player_t *currentPlayer, storage_t *inventory)
+{
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_CONTAINER_SET_CONTENT);
+  sendVarInt(0); // Window ID
+  sendVarInt(0); // State ID
+  sendVarInt(INVENTORY_SIZE);
+  for (int i = 0; i < INVENTORY_SIZE; i++)
+  {
+    sendVarInt(inventory->inventory_slots[i].count); // Item count
+    if (inventory->inventory_slots[i].count != 0)
+    {
+      sendVarInt(inventory->inventory_slots[i].item_id); // Item ID
+      sendVarInt(0);                                     // Add Data component array
+      sendVarInt(0);                                     // Remove  Data component array
+    }
+  }
+  sendVarInt(0); // Dragged by mouse Item Count
+  sendDone();
+}
+
+void PlayS2Ccontainersetslot(player_t *currentPlayer, int32_t window_id, int16_t slot, int16_t count, int32_t item_id)
+{
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_CONTAINER_SET_SLOT);
+  sendVarInt(window_id); // window id
+  sendVarInt(0);         // State ID
+  sendShort(slot);       // Slot
+  sendVarInt(count);     // Item count
+  if (count)
+  {
+    sendVarInt(item_id);
+    sendVarInt(0);
+    sendVarInt(0);
+  }
+  sendDone();
+}
+
+void PlayS2Copenscreen(player_t *currentPlayer, int32_t window_id, int32_t window_type, char *window_title)
+{
+
+  sendStart();
+  sendPlayPacketHeader(S2C_PLAY_OPEN_SCREEN);
+  sendVarInt(window_id);
+  sendVarInt(window_type);
+  sendFormattedString(window_title, -1);
   sendDone();
 }
 void ConfigurationS2Cfeatures()
@@ -576,7 +633,8 @@ void ConfigurationS2Cregistry()
       "unattributed_fireball",
       "wind_charge",
       "wither",
-      "wither_skull"};
+      "wither_skull",
+      "spear"};
   sendStart();
   sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
   sendString("damage_type", -1);
@@ -586,6 +644,168 @@ void ConfigurationS2Cregistry()
     sendString(damage_types[i], -1);
     sendByte(0);
   }
+  sendDone();
+
+  static const char *timeline[] = {
+      "day",
+      "early_game",
+      "moon",
+      "villager_schedule"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("timeline", -1);
+  sendVarInt(sizeof(timeline) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(timeline) / sizeof(char *)); i++)
+  {
+    sendString(timeline[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *world_clock[] = {
+      "overworld",
+      "the_end",
+  };
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("world_clock", -1);
+  sendVarInt(sizeof(world_clock) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(world_clock) / sizeof(char *)); i++)
+  {
+    sendString(world_clock[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *trim_materials[] = {
+      "diamond",
+      "redstone",
+      "emerald",
+      "lapis",
+      "quartz",
+      "resin",
+      "netherite",
+      "amethyst",
+      "copper",
+      "gold",
+      "iron"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("trim_material", -1);
+  sendVarInt(sizeof(trim_materials) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(trim_materials) / sizeof(char *)); i++)
+  {
+    sendString(trim_materials[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *chicken_variant[] = {
+      "cold",
+      "temperate",
+      "warm"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("chicken_variant", -1);
+  sendVarInt(sizeof(chicken_variant) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(chicken_variant) / sizeof(char *)); i++)
+  {
+    sendString(chicken_variant[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *jukebox_song[] = {
+      "11",
+      "13",
+      "5",
+      "blocks",
+      "cat",
+      "chirp",
+      "creator",
+      "creator_music_box",
+      "far",
+      "lava_chicken",
+      "mall",
+      "mellohi",
+      "otherside",
+      "pigstep",
+      "precipice",
+      "relic",
+      "stal",
+      "strad",
+      "tears",
+      "wait",
+      "ward"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("jukebox_song", -1);
+  sendVarInt(sizeof(jukebox_song) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(jukebox_song) / sizeof(char *)); i++)
+  {
+    sendString(jukebox_song[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *instruments[] = {
+      "admire_goat_horn",
+      "call_goat_horn",
+      "dream_goat_horn",
+      "feel_goat_horn",
+      "ponder_goat_horn",
+      "seek_goat_horn",
+      "sing_goat_horn",
+      "yearn_goat_horn"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("instrument", -1);
+  sendVarInt(sizeof(instruments) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(instruments) / sizeof(char *)); i++)
+  {
+    sendString(instruments[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("chicken_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("cat_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("cow_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("pig_sound_variant", -1);
+  sendVarInt(1);
+  sendString("classic", -1);
+  sendByte(0);
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
+  sendString("zombie_nautilus_variant", -1);
+  sendVarInt(1);
+  sendString("temperate", -1);
+  sendByte(0);
   sendDone();
 
   sendStart();
@@ -622,14 +842,6 @@ void ConfigurationS2Cregistry()
 
   sendStart();
   sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
-  sendString("chicken_variant", -1);
-  sendVarInt(1);
-  sendString("cold", -1);
-  sendByte(0);
-  sendDone();
-
-  sendStart();
-  sendConfigurationPacketHeader(S2C_CONFIGURATION_REGISTRY_DATA);
   sendString("cow_variant", -1);
   sendVarInt(1);
   sendString("cold", -1);
@@ -651,7 +863,62 @@ void ConfigurationS2Cregistry()
   sendString("angry", -1);
   sendByte(0);
   sendDone();
+}
+void ConfigurationS2Cupdatetags()
+{
 
+  static const char *damage_types_tag[] = {
+      "is_fire",
+      "is_explosion",
+      "bypasses_shield"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_UPDATE_TAGS);
+  sendByte(1);
+  sendString("damage_type", -1);
+  sendVarInt(sizeof(damage_types_tag) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(damage_types_tag) / sizeof(char *)); i++)
+  {
+    sendString(damage_types_tag[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  static const char *banner_pattern_tag[] = {
+      "pattern_item/creeper",
+      "pattern_item/flower",
+      "pattern_item/skull",
+      "pattern_item/mojang",
+      "pattern_item/skull",
+      "pattern_item/globe",
+      "pattern_item/piglin",
+      "pattern_item/flow",
+      "pattern_item/guster",
+      "pattern_item/field_masoned",
+      "pattern_item/bordure_indented"};
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_UPDATE_TAGS);
+  sendByte(1);
+  sendString("banner_pattern", -1);
+  sendVarInt(sizeof(banner_pattern_tag) / sizeof(char *));
+  for (size_t i = 0; i < (size_t)(sizeof(banner_pattern_tag) / sizeof(char *)); i++)
+  {
+    sendString(banner_pattern_tag[i], -1);
+    sendByte(0);
+  }
+  sendDone();
+
+  sendStart();
+  sendConfigurationPacketHeader(S2C_CONFIGURATION_UPDATE_TAGS);
+  sendByte(1);
+  sendString("timeline", -1);
+  sendByte(1);
+  sendString("in_overworld", -1);
+  sendByte(4);
+  sendByte(3);
+  sendByte(0);
+  sendByte(2);
+  sendByte(1);
+  sendDone();
 }
 void ConfigurationS2Cready()
 {

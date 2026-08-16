@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define VARINT_MAX 5
+
 struct readPacketVars_t
 {
   uint8_t buffer[READBUFSIZE];
@@ -28,16 +30,21 @@ struct sendPacketVars_t
   uint8_t *packetbuffer;
   size_t packetsize;
   size_t packetindex;
+  // prefixed
+  size_t packet_prefixed_start;
+  size_t packet_prefixed_end;
   // global buffer for all the clients
-  uint8_t switch_to_global_buffer : 1;
   uint8_t *globalbuffer;
   size_t globalbuffersize;
   size_t globalbufferindex;
   // local buffer
-  uint8_t switch_to_localbuffer : 1;
   char *localbuffer;
   size_t localbuffersize;
   size_t localbufferindex;
+  // Flags
+  uint8_t packet_prefixed_active : 1;
+  uint8_t global_buffer_active : 1;
+  uint8_t localbuffer_active : 1;
   // player object
   player_t *player;
 };
@@ -48,7 +55,7 @@ void readStart(player_t *player);
 uint8_t readPeekByte();
 uint8_t readByte();
 void readBuffer(char *buffer, size_t size);
-uint16_t readShort();
+int16_t readShort();
 double readDouble();
 float readFloat();
 int64_t readLong();
@@ -68,12 +75,13 @@ void sendGlobalBuffer(player_t *player);
 // writing utils, one player context only.
 size_t sendData(uint8_t *data, size_t packetsize, int *blocked);
 void sendStartPlayer(player_t *player);
-void sendMainByte(uint8_t byte);
 void sendDispatch();
 void sendFlush(player_t *player);
 uint8_t sendAllowed();
 void sendStart();
 void sendByte(uint8_t b);
+void sendPrefixedStart();
+void sendPrefixedEnd();
 void sendPlayPacketHeader(size_t id);
 void sendConfigurationPacketHeader(size_t id);
 void sendBuffer(const char *buf, size_t len);
@@ -83,10 +91,10 @@ void sendLong(int64_t v);
 void sendDouble(double v);
 void sendFloat(float v);
 void sendDone();
-void sendRawData(char *dat, size_t len);
 void sendVarInt(int32_t value);
 void sendPosition(int32_t x, int32_t y, int32_t z);
 void sendString(const char *str, size_t len);
+void sendFormattedString(const char *str, size_t len);
 void sendUUID(uint16_t seed);
 void sendUUIDString(uint16_t seed);
 void socketioCleanup();

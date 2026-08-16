@@ -5,318 +5,437 @@
 #include "log.h"
 #include "s2c.h"
 #include "wrapper.h"
+#include "blocks.h"
+#include "blocks/items.h"
 #include "UCraft.h"
-#include "blocks/blocks.h"
+#include "recipes.h"
 
-static gameData_t gameData;
-// write a message to the chat
-void printChatFormatted(char *fmt, ...)
-{
-    char buf[256];
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(buf, sizeof(buf), fmt, args);
-    PlayS2Csysmessage(buf, strnlen(buf, sizeof(buf)));
-    va_end(args);
-}
-static uint8_t isPlayerInArena(player_t *currentPlayer)
-{
-    int32_t x = currentPlayer->x;
-    int32_t z = currentPlayer->z;
-    const int32_t radiusSquared = GAME_RADIUS * GAME_RADIUS;
-    int distanceSquared = (x - gameData.centerX) * (x - gameData.centerX) + (z - gameData.centerZ) * (z - gameData.centerZ);
-    return distanceSquared < radiusSquared;
-}
-static void setBlock(int32_t x, int32_t z, uint8_t value)
-{
-    size_t index = (x - gameData.centerX + GAME_RADIUS) + (z - gameData.centerZ + GAME_RADIUS) * GAME_RADIUS * 2;
-    if (index / 8 < sizeof(gameData.blocks))
-    {
-        if (value)
-        {
-            gameData.blocks[index / 8] |= (1 << (index % 8));
-        }
-        else
-        {
-            gameData.blocks[index / 8] &= ~(1 << (index % 8));
-        }
-    }
-}
-static uint8_t getBlock(int32_t x, int32_t z)
-{
-    size_t index = (x - gameData.centerX + GAME_RADIUS) + (z - gameData.centerZ + GAME_RADIUS) * GAME_RADIUS * 2;
-    if (index / 8 < sizeof(gameData.blocks))
-    {
-        return (gameData.blocks[index / 8] & (1 << (index % 8))) != 0;
-    }
-    return 0;
-}
-static void drawArena(int32_t centerX, int32_t centerY, int32_t centerZ)
-{
-    int32_t x = 0;
-    int32_t z = 0;
-    gameData.centerX = centerX;
-    gameData.centerY = centerY;
-    gameData.centerZ = centerZ;
-    const int32_t radiusSquared = GAME_RADIUS * GAME_RADIUS;
-    for (z = centerZ - GAME_RADIUS; z <= centerZ + GAME_RADIUS; z++)
-    {
-        for (x = centerX - GAME_RADIUS; x <= centerX + GAME_RADIUS; x++)
-        {
-            int distanceSquared = (x - centerX) * (x - centerX) + (z - centerZ) * (z - centerZ);
-            // construct the player area
-            if (distanceSquared < radiusSquared)
-            {
-                if (getBlock(x, z))
-                {
-                    if ((distanceSquared % 5) == 0)
-                    {
-                        PlayS2Cblock(MINECRAFT_SAND, x, centerY, z);
-                    }
-                    else
-                    {
-                        PlayS2Cblock(MINECRAFT_RED_SAND, x, centerY, z);
-                    }
-                }
-                else
-                {
-                    PlayS2Cblock(MINECRAFT_AIR, x, centerY, z);
-                }
-            }
-            // construct the border
-            else if (distanceSquared - radiusSquared < 2 * GAME_RADIUS && distanceSquared - radiusSquared >= 0)
-            {
-                for (int i = -1; i < 3; i++)
-                {
-                    PlayS2Cblock(MINECRAFT_SANDSTONE, x, centerY + i, z);
-                }
-            }
-        }
-    }
-}
-// ready every player
-static void readyPlayers()
-{
-    player_t *currentPlayer = playerGetHead();
-    size_t count = 0;
-    while (currentPlayer != NULL)
-    {
-        currentPlayer->gamePlayerData.isSpectating = 0;
-        currentPlayer->gamePlayerData.isPlaying = 1;
-        currentPlayer->gamePlayerData.bx = 0;
-        currentPlayer->gamePlayerData.bz = 0;
-        currentPlayer->ability = ABILILTIES_CLEAR;
-        currentPlayer->gamemode = 2;
-        PlayS2Ctablist(currentPlayer, TABLIST_ACTION_GAMEMODE, currentPlayer->id);
-        currentPlayer = currentPlayer->next;
-        count++;
-    }
-    gameData.initalPlayers = count;
-    gameData.players = count;
-}
-// update player count
-static void updatePlayerCount()
-{
-    player_t *currentPlayer = playerGetHead();
-    size_t count = 0;
-    while (currentPlayer != NULL)
-    {
-        if (currentPlayer->gamePlayerData.isPlaying)
-        {
-            count++;
-        }
-        currentPlayer = currentPlayer->next;
-    }
-    gameData.players = count;
-}
-static void startGame(size_t playerCount)
-{
-    if (playerCount <= 1)
-    {
-        if ((main_tick % 500) == 0)
-        {
-            printChatFormatted("Not enough players, waiting for players");
-        }
-        gameData.startDelay = 1000;
-        return;
-    }
-    if (gameData.isStarted == 0)
-    {
-        if (gameData.startDelay == 0)
-        {
-            gameData.startDelay = 1000;
-            gameData.isStarted = 1;
-            return;
-        }
-        if (gameData.startDelay == 500)
-        {
-            readyPlayers();
-            // this will brodcast to all the players
-            PlayS2Cpositionrotation(playerGetHead(), gameData.centerX, gameData.centerY + 2, gameData.centerZ);
-        }
-        if ((gameData.startDelay % 100) == 0)
-        {
-            printChatFormatted("Starting game in %lds", gameData.startDelay / 100);
-        }
-        gameData.startDelay--;
-    }
-    // check for a deadlock
-    if ((gameData.players == 0) && gameData.initalPlayers)
-    {
-        printl(LOG_WARN, "deadlock, resting game state\n");
-        printChatFormatted("§4Game is in an invalid state! Reseting!");
-        memset(gameData.blocks, 0xff, sizeof(gameData.blocks));
-        drawArena(0, 0, 0);
-        gameData.isStarted = 0;
-        gameData.initalPlayers = 0;
-        gameData.players = 0;
-        gameData.startDelay = 1000;
-    }
-}
-static void resetPlayer(player_t *currentPlayer)
-{
-    currentPlayer->gamePlayerData.isPlaying = 0;
-    currentPlayer->gamePlayerData.isSpectating = 1;
-    currentPlayer->gamePlayerData.bx = 0;
-    currentPlayer->gamePlayerData.bz = 0;
-    currentPlayer->ability = ABILILTIES_FLYING;
-    currentPlayer->gamemode = 3;
-    PlayS2Ctablist(currentPlayer, TABLIST_ACTION_GAMEMODE, currentPlayer->id);
-    PlayS2Cteleport(currentPlayer, gameData.centerX, gameData.centerY + 2, gameData.centerZ);
-    currentPlayer->teleport = 1;
-    updatePlayerCount();
-}
+static game_data_t gameData;
+
 // fired when the server is about to start
 void gamePreload()
 {
-    memset(gameData.blocks, 0xff, sizeof(gameData.blocks));
-    gameData.startDelay = 1000;
+    blocksInit();
+    memset(&gameData, 0, sizeof(game_data_t));
+    gameData.time = 24000 / 4; // noon
 }
-// fired when a player joins the server and the chunks are loaded
-void gameChunkLoaded(player_t *currentPlayer)
+
+void gameCleanup()
 {
-    currentPlayer->gamePlayerData.isSpectating = 1;
-    currentPlayer->ability = ABILILTIES_CAN_FLY | ABILILTIES_FLYING;
-    drawArena(0, 0, 0);
+    storageInventoryCleanup();
+    blocksCleanup();
 }
 // fired when a player leaves
 void gamePlayerLeft(player_t *currentPlayer)
 {
-    memset(&currentPlayer->gamePlayerData, 0, sizeof(currentPlayer->gamePlayerData));
-    updatePlayerCount();
+    if (currentPlayer->gamePlayerData.crafting_menu)
+    {
+        U_free(currentPlayer->gamePlayerData.crafting_menu);
+        currentPlayer->gamePlayerData.crafting_menu = NULL;
+    }
 }
 // fired every tick in the global context
 // NOTE: this will run even if there are no players so be careful when sending packets
 void gameGlobalTick()
 {
-    size_t playerCount = 0;
-    if ((playerCount = playerGetInGameCount()) == 0)
+
+    if ((main_tick % ((1000 / TICK_TIME_MS) * 10)) == 0) // update the time on the client after every 10 seconds
     {
-        return;
+        if (playerGetActiveCount() > 0)
+        {
+            PlayS2Csettime(gameData.time, 0);
+        }
     }
-    startGame(playerCount);
+    if ((main_tick % ((1000 / TICK_TIME_MS) * 1)) == 0) // should be every second
+    {
+        if (gameData.time < 24000)
+        {
+            gameData.time += 20;
+        }
+        else
+        {
+            gameData.time = 0;
+        }
+    }
 }
-// fired every tick in the global context for the current player
+// fired every tick in the global context for the current player {so it will replicate for others}
 void gamePlayerGlobalTick(player_t *currentPlayer)
 {
-    // check the player if they go too far from the arena
-    int32_t maxDistance = GAME_RADIUS + 10;
-    if (currentPlayer->x > maxDistance || currentPlayer->x < -maxDistance || currentPlayer->y > maxDistance || currentPlayer->y < -maxDistance || currentPlayer->z > maxDistance || currentPlayer->z < -maxDistance)
-    {
-        resetPlayer(currentPlayer);
-    }
-    // Game is started
-    if (gameData.isStarted)
-    {
-        // check the player count in game
-        if (gameData.players == 1 && gameData.initalPlayers > 0)
-        {
+}
 
-            if (currentPlayer->gamePlayerData.isPlaying)
-            {
-                printChatFormatted("§a%s §ehas won the game!", currentPlayer->name);
-                memset(gameData.blocks, 0xff, sizeof(gameData.blocks));
-                drawArena(0, 0, 0);
-                gameData.isStarted = 0;
-                gameData.initalPlayers = 0;
-                gameData.players = 0;
-                currentPlayer->gamePlayerData.isPlaying = 0;
-                currentPlayer->gamePlayerData.isSpectating = 1;
-                currentPlayer->gamePlayerData.bx = 0;
-                currentPlayer->gamePlayerData.bz = 0;
-                currentPlayer->ability = ABILILTIES_CAN_FLY | ABILILTIES_FLYING;
-                currentPlayer->gamemode = 3;
-                PlayS2Ctablist(currentPlayer, TABLIST_ACTION_GAMEMODE, currentPlayer->id);
-            }
-            return;
-        }
-        if (currentPlayer->gamePlayerData.isPlaying)
-        {
-
-            // check if the player is in the arena
-            if (isPlayerInArena(currentPlayer) && (currentPlayer->y >= gameData.centerY + 1) && (currentPlayer->y < gameData.centerY + 3))
-            {
-                int32_t x = floor(currentPlayer->x);
-                int32_t z = floor(currentPlayer->z);
-                if (x == currentPlayer->gamePlayerData.bx && z == currentPlayer->gamePlayerData.bz)
-                {
-                    currentPlayer->gamePlayerData.ongroundtimeout++;
-                }
-                // player is in some corner, so get rid of the blocks
-                if (currentPlayer->gamePlayerData.ongroundtimeout > 70)
-                {
-                    for (int32_t i = -1; i < 2; i++)
-                    {
-                        for (int32_t j = -1; j < 2; j++)
-                        {
-                            if (getBlock(x + i, z + j))
-                            {
-                                setBlock(x + i, z + j, 0);
-                                PlayS2Cblock(MINECRAFT_AIR, x + i, gameData.centerY, z + j);
-                            }
-                        }
-                    }
-                    currentPlayer->gamePlayerData.ongroundtimeout = 0;
-                }
-                if (getBlock(x, z))
-                {
-                    if (currentPlayer->gamePlayerData.timeout > 40)
-                    {
-                        setBlock(x, z, 0);
-                        PlayS2Cblock(MINECRAFT_AIR, x, gameData.centerY, z);
-                        currentPlayer->gamePlayerData.timeout = 0;
-                    }
-                    if (currentPlayer->gamePlayerData.bx != x || currentPlayer->gamePlayerData.bz != z)
-                    {
-                        setBlock(currentPlayer->gamePlayerData.bx, currentPlayer->gamePlayerData.bz, 0);
-                        PlayS2Cblock(MINECRAFT_AIR, currentPlayer->gamePlayerData.bx, gameData.centerY, currentPlayer->gamePlayerData.bz);
-                        currentPlayer->gamePlayerData.bx = x;
-                        currentPlayer->gamePlayerData.bz = z;
-                        currentPlayer->gamePlayerData.timeout = 0;
-                        currentPlayer->gamePlayerData.ongroundtimeout = 0;
-                    }
-                    currentPlayer->gamePlayerData.timeout++;
-                }
-                else
-                {
-                    // check if the player is unscyned
-                    if (currentPlayer->onground)
-                    {
-                        PlayS2Cblock(MINECRAFT_AIR, x, gameData.centerY, z);
-                    }
-                }
-            }
-            // check if the player fell down
-            if (currentPlayer->y < gameData.centerY - 4)
-            {
-                resetPlayer(currentPlayer);
-                printChatFormatted("§a%s §ffell down (%ld/%ld)", currentPlayer->name, gameData.players, gameData.initalPlayers);
-            }
-        }
+//  fired every tick in the global context for the current player but will announce it to the other players only and ignore the current client
+void gamePlayerGlobalTickOthers(player_t *currentPlayer)
+{
+    if (currentPlayer->gamePlayerData.block_update_event)
+    {
+        PlayS2Cblock(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+        currentPlayer->gamePlayerData.block_update_event = 0;
     }
+}
+
+// fired when the player is spawned in the local context {fired once}
+void gamePlayerSpawned(player_t *currentPlayer)
+{
+    // Local chunk
+    currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+    currentPlayer->gamePlayerData.chunk_lz = -VIEWDISTANCE;
+
+    currentPlayer->gamePlayerData.chunk_spawn_event = 1;
+    currentPlayer->gamePlayerData.chunk_load_event = 1;
+
+    // Restore the inventory
+    storageInventoryUpdate(currentPlayer);
+    // Update Time
+    PlayS2Csettime(gameData.time, 0);
 }
 
 // fired in local context
 void gamePlayerLocalTick(player_t *currentPlayer)
 {
+    // chunk generation stuff
+    if (currentPlayer->gamePlayerData.chunk_load_event)
+    {
+        if (currentPlayer->chunk_px != 0 || currentPlayer->chunk_pz != 0)
+        {
+            // send only the new edge column/row.
+            if (currentPlayer->chunk_px != 0)
+            {
+                int32_t chunk_x = currentPlayer->gamePlayerData.chunk_x + (currentPlayer->chunk_px * VIEWDISTANCE);
+                int32_t chunk_z = currentPlayer->gamePlayerData.chunk_z + currentPlayer->gamePlayerData.chunk_lz;
+                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z, 3, 7);
+                if (currentPlayer->gamePlayerData.chunk_lz < VIEWDISTANCE)
+                {
+                    currentPlayer->gamePlayerData.chunk_lz++;
+                }
+                else
+                {
+                    currentPlayer->gamePlayerData.chunk_lz = -VIEWDISTANCE;
+                    currentPlayer->chunk_px = 0;
+                }
+            }
+            else
+            {
+                int32_t chunk_x = currentPlayer->gamePlayerData.chunk_x + currentPlayer->gamePlayerData.chunk_lx;
+                int32_t chunk_z = currentPlayer->gamePlayerData.chunk_z + (currentPlayer->chunk_pz * VIEWDISTANCE);
+                PlayS2Cchunk(currentPlayer, chunk_x, chunk_z, 3, 7);
+                if (currentPlayer->gamePlayerData.chunk_lx < VIEWDISTANCE)
+                {
+                    currentPlayer->gamePlayerData.chunk_lx++;
+                }
+                else
+                {
+                    currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+                    currentPlayer->chunk_pz = 0;
+                }
+            }
+            if (currentPlayer->chunk_px == 0 && currentPlayer->chunk_pz == 0)
+            {
+                currentPlayer->gamePlayerData.chunk_load_event = 0;
+            }
+        }
+        else
+        {
+            // full square load
+            PlayS2Cchunk(currentPlayer, currentPlayer->gamePlayerData.chunk_lx + currentPlayer->gamePlayerData.chunk_x,
+                         currentPlayer->gamePlayerData.chunk_lz + currentPlayer->gamePlayerData.chunk_z,
+                         3, 7);
+            if (currentPlayer->gamePlayerData.chunk_lx < VIEWDISTANCE)
+            {
+                currentPlayer->gamePlayerData.chunk_lx++;
+            }
+            else
+            {
+                currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+                currentPlayer->gamePlayerData.chunk_lz++;
+            }
+            if (currentPlayer->gamePlayerData.chunk_lz > VIEWDISTANCE)
+            {
+                // close the 'Loading terrain' screen and set the coordinates of the player
+                if (currentPlayer->gamePlayerData.chunk_spawn_event)
+                {
+                    PlayS2Cpositionrotation(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
+                    PlayS2Ccompassposition(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
+                    PlayS2Cgameevent(EVENT_WAIT_LEVEL_CHUNKS, 1.0f);
+                    PlayS2Cchunkcenter(currentPlayer, currentPlayer->gamePlayerData.chunk_x, currentPlayer->gamePlayerData.chunk_z);
+
+                    currentPlayer->gamePlayerData.chunk_spawn_event = 0;
+                }
+                currentPlayer->gamePlayerData.chunk_load_event = 0;
+            }
+        }
+    }
+    else
+    {
+        // check if the conditions for a chunk update are met
+        int32_t dx = currentPlayer->chunk_x - currentPlayer->gamePlayerData.chunk_x;
+        int32_t dz = currentPlayer->chunk_z - currentPlayer->gamePlayerData.chunk_z;
+
+        if (dx != 0 || dz != 0)
+        {
+            PlayS2Cchunkcenter(currentPlayer, currentPlayer->chunk_x, currentPlayer->chunk_z);
+            currentPlayer->gamePlayerData.chunk_x = currentPlayer->chunk_x;
+            currentPlayer->gamePlayerData.chunk_z = currentPlayer->chunk_z;
+            currentPlayer->gamePlayerData.chunk_lx = -VIEWDISTANCE;
+            currentPlayer->gamePlayerData.chunk_lz = -VIEWDISTANCE;
+
+            if (dx > 1 || dx < -1 || dz > 1 || dz < -1)
+            {
+                // moved too far
+                currentPlayer->chunk_px = 0;
+                currentPlayer->chunk_pz = 0;
+            }
+            else
+            {
+                // moved one chunk: load only the new border(s)
+                currentPlayer->chunk_px = (dx > 0) ? 1 : (dx < 0) ? -1
+                                                                  : 0;
+                currentPlayer->chunk_pz = (dz > 0) ? 1 : (dz < 0) ? -1
+                                                                  : 0;
+            }
+            currentPlayer->gamePlayerData.chunk_load_event = 1;
+        }
+    }
+    // inventory update
+    if (currentPlayer->gamePlayerData.full_inventory_update_event)
+    {
+        storageInventoryUpdate(currentPlayer);
+        currentPlayer->gamePlayerData.full_inventory_update_event = 0;
+    }
+    // crafting table event
+    if (currentPlayer->gamePlayerData.crafting_table_event)
+    {
+        if (currentPlayer->gamePlayerData.crafting_menu)
+        {
+            inventory_slots_t slots[9];
+            memset(&slots, 0, sizeof(slots));
+            for (int i = 1; i <= 9; i++)
+            {
+                if (currentPlayer->gamePlayerData.crafting_menu[i].item_id)
+                {
+                    slots[i - 1].item_id = currentPlayer->gamePlayerData.crafting_menu[i].item_id;
+                    slots[i - 1].count = currentPlayer->gamePlayerData.crafting_menu[i].count;
+                }
+            }
+            size_t count = 0;
+            int32_t crafted_item = get_crafted_item(currentPlayer, slots, &count);
+            PlayS2Ccontainersetslot(currentPlayer, 1, 0, count, crafted_item);
+        }
+        currentPlayer->gamePlayerData.crafting_table_event = 0;
+    }
+    // inventory crafting event
+    if (currentPlayer->gamePlayerData.inventory_crafting_event)
+    {
+        inventory_slots_t slots[9];
+        memset(&slots, 0, sizeof(slots));
+        size_t index = 0;
+        for (int i = 1; i < 5; i++)
+        {
+            inventory_slots_t slot;
+            storageInventoryGetSlot(currentPlayer, i, &slot);
+            if (slot.item_id)
+            {
+                slots[index].count = slot.count;
+                slots[index].item_id = slot.item_id;
+            }
+            if (i > 1 && i < 3)
+            {
+                index += 2;
+            }
+            else
+            {
+                index++;
+            }
+        }
+        size_t count = 0;
+        int32_t crafted_item = get_crafted_item(currentPlayer, slots, &count);
+        PlayS2Ccontainersetslot(currentPlayer, 0, 0, count, crafted_item);
+        currentPlayer->gamePlayerData.inventory_crafting_event = 0;
+    }
+    // blocks
+    if (currentPlayer->gamePlayerData.action_item_event)
+    {
+        inventory_slots_t slot;
+        storageInventoryGetSlot(currentPlayer, 36 + currentPlayer->gamePlayerData.inventory_slot, &slot);
+        int32_t block = blocksGetBlock(currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+        if (currentPlayer->gamePlayerData.action_item_event == 2) // block placing event
+        {
+
+            // 3x3 crafitng state
+            if (block == MINECRAFT_CRAFTING_TABLE && currentPlayer->sneaking != 1)
+            {
+                if (currentPlayer->gamePlayerData.crafting_menu == NULL)
+                {
+                    currentPlayer->gamePlayerData.crafting_menu = U_calloc(INVENTORY_SIZE, sizeof(inventory_slots_t));
+                    storage_t *inventory = storageInventoryGet(currentPlayer);
+                    // copy the inventory according to the crafting table mapping
+                    for (int i = 10; i < INVENTORY_SIZE; i++)
+                    {
+                        currentPlayer->gamePlayerData.crafting_menu[i].item_id = inventory->inventory_slots[i - 1].item_id;
+                        currentPlayer->gamePlayerData.crafting_menu[i].count = inventory->inventory_slots[i - 1].count;
+                    }
+                }
+
+                PlayS2Copenscreen(currentPlayer, 1, 12, "Crafting");
+            }
+            else
+            {
+                currentPlayer->gamePlayerData.block_state = minecraft_block_state_from_item(slot.item_id);
+                if (currentPlayer->gamePlayerData.block_state)
+                {
+                    if (slot.count)
+                    {
+                        slot.count--;
+                        storageInventoryUpdateSlot(currentPlayer, 36 + currentPlayer->gamePlayerData.inventory_slot, slot.count, slot.item_id);
+                        storageInventoryUpdate(currentPlayer);
+                    }
+                    switch (currentPlayer->gamePlayerData.block_face)
+                    {
+                    case 0:
+                        currentPlayer->gamePlayerData.block_y--;
+                        break;
+
+                    case 1:
+                        currentPlayer->gamePlayerData.block_y++;
+                        break;
+
+                    case 2:
+                        currentPlayer->gamePlayerData.block_z--;
+                        break;
+
+                    case 3:
+                        currentPlayer->gamePlayerData.block_z++;
+                        break;
+
+                    case 4:
+                        currentPlayer->gamePlayerData.block_x--;
+                        break;
+
+                    case 5:
+                        currentPlayer->gamePlayerData.block_x++;
+                        break;
+                    default:
+                        break;
+                    }
+                    blocksUpdate(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+                    PlayS2Cblock(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+                    PlayS2Cblockchangeack(currentPlayer, currentPlayer->gamePlayerData.block_sequence);
+                }
+            }
+        }
+        else if (currentPlayer->gamePlayerData.action_item_event == 1) // block breaking
+        {
+            int32_t item_broken = minecraft_item_from_block_state(block);
+            // verify the entry
+            static const int32_t tools[] = {MINECRAFT_WOODEN_PICKAXE_ITEM, MINECRAFT_STONE_PICKAXE_ITEM, MINECRAFT_IRON_PICKAXE_ITEM, MINECRAFT_DIAMOND_PICKAXE_ITEM};
+            switch (item_broken)
+            {
+            case MINECRAFT_GRASS_BLOCK_ITEM:
+                item_broken = MINECRAFT_DIRT_ITEM;
+                break;
+            case MINECRAFT_STONE:
+            {
+                item_broken = MINECRAFT_AIR_ITEM;
+                if (slot.count)
+                {
+
+                    for (size_t i = 0; i < (size_t)(sizeof(tools) / sizeof(int32_t)); i++)
+                    {
+                        if (slot.item_id == tools[i])
+                        {
+                            item_broken = MINECRAFT_COBBLESTONE_ITEM;
+                            break;
+                        }
+                    }
+                }
+                break;
+            }
+            case MINECRAFT_COAL_ORE_ITEM:
+                item_broken = MINECRAFT_AIR_ITEM;
+                if (slot.count)
+                {
+
+                    for (size_t i = 0; i < (size_t)(sizeof(tools) / sizeof(int32_t)); i++)
+                    {
+                        if (slot.item_id == tools[i])
+                        {
+                            item_broken = MINECRAFT_COAL_ITEM;
+                            break;
+                        }
+                    }
+                }
+                break;
+            case MINECRAFT_IRON_ORE_ITEM:
+                item_broken = MINECRAFT_AIR_ITEM;
+                if (slot.count)
+                {
+
+                    for (size_t i = 0; i < (size_t)(sizeof(tools) / sizeof(int32_t)); i++)
+                    {
+                        if (tools[i] == MINECRAFT_WOODEN_PICKAXE_ITEM)
+                        {
+                            continue;
+                        }
+                        if (slot.item_id == tools[i])
+                        {
+                            item_broken = MINECRAFT_RAW_IRON_ITEM;
+                            break;
+                        }
+                    }
+                }
+                break;
+            case MINECRAFT_DIAMOND_ORE_ITEM:
+                item_broken = MINECRAFT_AIR_ITEM;
+                if (slot.count)
+                {
+
+                    for (size_t i = 0; i < (size_t)(sizeof(tools) / sizeof(int32_t)); i++)
+                    {
+                        if (tools[i] == MINECRAFT_WOODEN_PICKAXE_ITEM)
+                        {
+                            continue;
+                        }
+                        if (tools[i] == MINECRAFT_STONE_PICKAXE_ITEM)
+                        {
+                            continue;
+                        }
+                        if (slot.item_id == tools[i])
+                        {
+                            item_broken = MINECRAFT_DIAMOND_ITEM;
+                            break;
+                        }
+                    }
+                }
+                break;
+            case MINECRAFT_OAK_LEAVES_ITEM:
+            {
+                // 93% : air;
+                // 2%: stick
+                // 5%: sapling
+                static const uint8_t weight[] = {93, 2, 5};
+                static const int32_t choice[] = {MINECRAFT_AIR_ITEM, MINECRAFT_STICK_ITEM, MINECRAFT_OAK_SAPLING_ITEM};
+                size_t selection = rand() % 101;
+                for (size_t i = 0; i < 3; i++)
+                {
+                    if (selection < weight[i])
+                    {
+                        item_broken = choice[i];
+                        break;
+                    }
+                    selection -= weight[i];
+                }
+                break;
+            }
+            default:
+                break;
+            }
+            storageInventoryInsertItem(currentPlayer, item_broken, 1);
+            storageInventoryUpdate(currentPlayer);
+            blocksUpdate(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+            PlayS2Cblock(currentPlayer->gamePlayerData.block_state, currentPlayer->gamePlayerData.block_x, currentPlayer->gamePlayerData.block_y, currentPlayer->gamePlayerData.block_z);
+            PlayS2Cblockchangeack(currentPlayer, currentPlayer->gamePlayerData.block_sequence);
+        }
+
+        currentPlayer->gamePlayerData.block_update_event = 1;
+        currentPlayer->gamePlayerData.action_item_event = 0;
+    }
 }

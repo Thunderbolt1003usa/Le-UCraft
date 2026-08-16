@@ -14,13 +14,35 @@
 #include "mbedtls/debug.h"
 #include "lwjson/lwjson.h"
 #include "wrapper.h"
+
 static httpsData_t httpsData;
+static struct sockaddr_in auth_server;
+
 #ifdef MBEDTLS_DEBUG_C
 static void sslDebug(void *ctx, int level, const char *file, int line, const char *str)
 {
     printl(LOG_INFO, "%s:%04d: %s", file, line, str);
 }
 #endif /*MBEDTLS_DEBUG_C*/
+
+static void httpsClose()
+{
+    if (httpsData.connection_closed)
+    {
+        return;
+    }
+
+    int ret;
+    do
+    {
+        ret = mbedtls_ssl_close_notify(&httpsData.ssl);
+    } while (ret == MBEDTLS_ERR_SSL_WANT_WRITE);
+    U_shutdown(httpsData.net.fd, SHUT_RDWR);
+    U_close(httpsData.net.fd);
+    mbedtls_ssl_free(&httpsData.ssl);
+    mbedtls_ssl_config_free(&httpsData.conf);
+    httpsData.connection_closed = 1;
+}
 // TODO: Add checks if the socket is nonblocking or not as the implementation for net_would_block is missing
 int mbedtls_net_recv(void *ctx, unsigned char *buf, size_t len)
 {
@@ -68,6 +90,7 @@ httpsData_t *httpsGetData()
 {
     return &httpsData;
 }
+
 int httpsConnect(player_t *currentPlayer, const char *hostname, const char *port)
 {
     if (currentPlayer == NULL)
@@ -92,22 +115,25 @@ int httpsConnect(player_t *currentPlayer, const char *hostname, const char *port
         return 1;
     }
     ret = U_setsocknonblock(httpsData.net.fd);
-    if (ret != 0)
+    if (ret < 0)
     {
         printl(LOG_ERROR, "U_setsocknonblock returned %d\n", ret);
         return 1;
     }
-    struct sockaddr_in server;
-    server.sin_family = AF_INET;
-    server.sin_port = htons(atoi(port));
-    struct hostent *hostinfo = U_gethostbyname(hostname);
-    if (!hostinfo)
+
+    auth_server.sin_family = AF_INET;
+    auth_server.sin_port = htons(atoi(port));
+    if (auth_server.sin_addr.s_addr == 0)
     {
-        printl(LOG_ERROR, "U_gethostbyname Failed\r\n");
-        return 1;
+        struct hostent *hostinfo = U_gethostbyname(hostname);
+        if (hostinfo == NULL)
+        {
+            printl(LOG_ERROR, "U_gethostbyname Failed\r\n");
+            return 1;
+        }
+        auth_server.sin_addr = *((struct in_addr *)hostinfo->h_addr);
     }
-    server.sin_addr = *((struct in_addr *)hostinfo->h_addr);
-    ret = U_connect(httpsData.net.fd, (struct sockaddr *)&server, sizeof(server));
+    ret = U_connect(httpsData.net.fd, (struct sockaddr *)&auth_server, sizeof(auth_server));
     if (ret != 0 && errno != 0 && errno != EINPROGRESS)
     {
         printl(LOG_ERROR, "U_connect returned %d errno: %s\n", ret, strerror(errno));
@@ -241,17 +267,33 @@ int httpsRtr(player_t *currentPlayer)
         strncpy((char *)currentPlayer->disconnect_reason, "Invalid session (Try restarting your game)", sizeof(((player_t *)0)->disconnect_reason));
         currentPlayer->remove_player_event = 1;
     }
+    size_t header_len = (size_t)(header_end - httpsData.buffer) + 4; // header_len includes the \r\n\r\n
+    size_t body_offset = header_len;
+    size_t content_length;
     // apparently its okay for the case to be different WHY
     char *content_length_header = strstr(httpsData.buffer, "Content-Length:");
     if (content_length_header == NULL)
     {
         content_length_header = strstr(httpsData.buffer, "content-length:");
-        if (content_length_header == NULL)
+    }
+    if (content_length_header != NULL && content_length_header < header_end)
+    {
+        content_length = (size_t)atoi(content_length_header + strlen("Content-Length:"));
+    }
+    else
+    {
+        // the auth server no longer sends Content-Length, so consider this case as well
+        char *chunk_size_end = strstr(&httpsData.buffer[body_offset], "\r\n");
+        if (chunk_size_end == NULL)
         {
+            // chunk-size line hasn't fully arrived yet
             return 1;
         }
+        content_length = (size_t)strtoul(&httpsData.buffer[body_offset], NULL, 16);
+        body_offset = (size_t)(chunk_size_end - httpsData.buffer) + 2;
     }
-    size_t content_length = atoi(content_length_header + strlen("Content-Length:"));
+    // close the connection as we dont need it anymore but keep the data for processing
+    httpsClose();
     // check the content length
     if (content_length >= sizeof(((httpsData_t *)0)->buffer))
     {
@@ -260,21 +302,20 @@ int httpsRtr(player_t *currentPlayer)
         return 0;
     }
     // check if all the data has been received
-    size_t len = (size_t)(header_end - httpsData.buffer) + 4; // len + 4 for the \r\n\r\n
-    if ((httpsData.offset - len) != content_length)
+    if ((httpsData.offset - body_offset) < content_length)
     {
         return 1;
     }
     httpsData.len = content_length;
-    httpsData.offset -= content_length;
+    httpsData.offset = body_offset;
     // add null terminator
-    if (httpsData.offset + httpsData.len + 1 >= sizeof(((httpsData_t *)0)->buffer))
+    if (httpsData.offset + httpsData.len >= sizeof(((httpsData_t *)0)->buffer))
     {
         printl(LOG_WARN, "https_rtr_event buffer overflow\n");
         currentPlayer->remove_player_event = 1;
         return 0;
     }
-    httpsData.buffer[httpsData.offset + httpsData.len + 1] = '\0';
+    httpsData.buffer[httpsData.offset + httpsData.len] = '\0';
     lwjson_token_t tokens[10];
     lwjson_t lwjson;
 
@@ -401,7 +442,7 @@ int httpsRts(player_t *currentPlayer)
     }
     if (httpsData.timeout > AUTH_TIMEOUT)
     {
-        printl(LOG_ERROR, "httpsRtr timeout\n");
+        printl(LOG_ERROR, "httpsRts timeout\n");
         strncpy((char *)currentPlayer->disconnect_reason, "Authentication Timeout", sizeof(((player_t *)0)->disconnect_reason));
         currentPlayer->remove_player_event = 1;
         return 0;
@@ -467,21 +508,13 @@ void httpsFreePlayer(player_t *currentPlayer)
         return;
     }
     // send SSL/TLS closure notification
-    int ret = 0;
-    do
-    {
-        ret = mbedtls_ssl_close_notify(&httpsData.ssl);
-    } while (ret == MBEDTLS_ERR_SSL_WANT_WRITE);
-    U_close(httpsData.net.fd);
-    mbedtls_ssl_free(&httpsData.ssl);
-    mbedtls_ssl_config_free(&httpsData.conf);
+    httpsClose();
     memset(&httpsData, 0, sizeof(httpsData_t));
     httpsData.currentPlayer = NULL;
 }
 void httpsCleanup()
 {
-    mbedtls_ssl_free(&httpsData.ssl);
-    mbedtls_ssl_config_free(&httpsData.conf);
+    httpsClose();
     memset(&httpsData, 0, sizeof(httpsData_t));
     httpsData.currentPlayer = NULL;
 }

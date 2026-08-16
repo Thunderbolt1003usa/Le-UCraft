@@ -4,6 +4,9 @@
 #include "socketio.h"
 #include "log.h"
 #include "util.h"
+#ifdef COMPRESSION
+#include "zlib.h"
+#endif
 
 static readPacketVars_t readPacketVars = {.pktbytes = -1};
 
@@ -38,16 +41,11 @@ void readBuffer(char *buffer, size_t size)
     buffer[i] = readByte();
   }
 }
-uint16_t readShort()
+int16_t readShort()
 {
-  uint16_t ret = 0;
-#if (ENDIAN)
+  int16_t ret = 0;
   ret |= readByte() << 8;
   ret |= readByte();
-#else
-  ret |= readByte();
-  ret |= readByte() << 8;
-#endif
   return ret;
 }
 double readDouble()
@@ -87,7 +85,7 @@ int32_t readVarInt()
   uint32_t position = 0;
   uint8_t currentByte;
 
-  for (int i = 0; i < 5; i++)
+  for (int i = 0; i < VARINT_MAX; i++)
   {
     currentByte = readByte();
     value |= (currentByte & 0x7F) << position;
@@ -118,6 +116,19 @@ void readPosition(int32_t *x, int32_t *y, int32_t *z)
   *x = (pos >> 38) & 0x3FFFFFF;
   *z = (pos >> 12) & 0x3FFFFFF;
   *y = pos & 0xFFF;
+
+  if (*x >= 1 << 25)
+  {
+    *x -= 1 << 26;
+  }
+  if (*y >= 1 << 11)
+  {
+    *y -= 1 << 12;
+  }
+  if (*z >= 1 << 25)
+  {
+    *z -= 1 << 26;
+  }
 }
 
 void readString(char *data, size_t maxlen)
@@ -152,31 +163,50 @@ void sendSwitchToGlobalBuffer()
       return;
     }
   }
-  sendPacketVars.switch_to_global_buffer = 1;
+  sendPacketVars.global_buffer_active = 1;
 }
 void sendRevertFromGlobalBuffer()
 {
-  sendPacketVars.switch_to_global_buffer = 0;
+  sendPacketVars.global_buffer_active = 0;
 }
 
 void sendSwitchToLocalBuffer(char *buf, size_t maxlen)
 {
   sendPacketVars.localbuffer = buf;
   sendPacketVars.localbuffersize = maxlen;
-  sendPacketVars.switch_to_localbuffer = 1;
+  sendPacketVars.localbuffer_active = 1;
 }
 size_t sendRevertFromLocalBuffer()
 {
   size_t len = sendPacketVars.localbufferindex;
   sendPacketVars.localbuffer = 0;
   sendPacketVars.localbuffersize = 0;
-  sendPacketVars.switch_to_localbuffer = 0;
+  sendPacketVars.localbuffer_active = 0;
   sendPacketVars.localbufferindex = 0;
   return len;
 }
-void sendExtByte(uint8_t b)
+static void send_main_byte(uint8_t byte)
 {
-  if (sendPacketVars.switch_to_global_buffer)
+  if (sendPacketVars.bufferindex >= sendPacketVars.buffersize)
+  {
+    uint8_t *buffer = NULL;
+    // allocate the required memory
+    sendPacketVars.buffersize += MEM_CHUNK_SIZE;
+    buffer = U_realloc(sendPacketVars.buffer, sendPacketVars.buffersize);
+    if (buffer == NULL)
+    {
+      printl(LOG_ERROR, "memory allocation failed buffer!\n");
+      sendPacketVars.player->remove_player_event = 1;
+      return;
+    }
+    // printl(LOG_INFO,"Buffer size: %ld\n", sendPacketVars.buffersize);
+    sendPacketVars.buffer = buffer;
+  }
+  sendPacketVars.buffer[sendPacketVars.bufferindex++] = byte;
+}
+static void send_raw_byte(uint8_t b)
+{
+  if (sendPacketVars.global_buffer_active)
   {
     if (sendPacketVars.globalbufferindex >= sendPacketVars.globalbuffersize)
     {
@@ -197,7 +227,7 @@ void sendExtByte(uint8_t b)
   }
   else
   {
-    sendMainByte(b);
+    send_main_byte(b);
   }
 }
 
@@ -235,13 +265,13 @@ void sendGlobalBuffer(player_t *player)
   {
     for (size_t i = 0; i < player->global_buffer_start_index; i++)
     {
-      sendMainByte(sendPacketVars.globalbuffer[i]);
+      send_main_byte(sendPacketVars.globalbuffer[i]);
     }
   }
   // send bytes from the end till the global buffer end
   for (size_t i = player->global_buffer_end_index; i < sendGetGlobalBufferIndex(); i++)
   {
-    sendMainByte(sendPacketVars.globalbuffer[i]);
+    send_main_byte(sendPacketVars.globalbuffer[i]);
   }
 }
 size_t sendData(uint8_t *data, size_t buffersize, int *blocked)
@@ -315,25 +345,7 @@ void sendStartPlayer(player_t *player)
     sendPacketVars.buffersize = sendPacketVars.bufferindex + 1;
   }
 }
-void sendMainByte(uint8_t byte)
-{
-  if (sendPacketVars.bufferindex >= sendPacketVars.buffersize)
-  {
-    uint8_t *buffer = NULL;
-    // allocate the required memory
-    sendPacketVars.buffersize += MEM_CHUNK_SIZE;
-    buffer = U_realloc(sendPacketVars.buffer, sendPacketVars.buffersize);
-    if (buffer == NULL)
-    {
-      printl(LOG_ERROR, "memory allocation failed buffer!\n");
-      sendPacketVars.player->remove_player_event = 1;
-      return;
-    }
-    // printl(LOG_INFO,"Buffer size: %ld\n", sendPacketVars.buffersize);
-    sendPacketVars.buffer = buffer;
-  }
-  sendPacketVars.buffer[sendPacketVars.bufferindex++] = byte;
-}
+
 static void sendQueueData(const uint8_t *data, size_t len)
 {
   if (len == 0)
@@ -474,11 +486,14 @@ void sendStart()
     }
   }
   sendPacketVars.packetindex = 0;
+  sendPacketVars.packet_prefixed_start = 0;
+  sendPacketVars.packet_prefixed_end = 0;
+  sendPacketVars.packet_prefixed_active = 0;
 }
 void sendByte(uint8_t b)
 {
 
-  if (sendPacketVars.switch_to_localbuffer)
+  if (sendPacketVars.localbuffer_active)
   {
     if (sendPacketVars.localbufferindex >= sendPacketVars.localbuffersize)
     {
@@ -514,6 +529,41 @@ void sendByte(uint8_t b)
     sendPacketVars.packetbuffer[sendPacketVars.packetindex++] = b;
   }
 }
+// TODO: Make it handle multiple contexts for the same packet window (from sendStart till sendDone if needed)
+void sendPrefixedStart()
+{
+  if (sendPacketVars.localbuffer_active)
+  {
+    printl(LOG_ERROR, "prefixed segment not supported in local buffer\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    printl(LOG_ERROR, "prefixed segment already active\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  sendPacketVars.packet_prefixed_start = sendPacketVars.packetindex;
+  sendPacketVars.packet_prefixed_active = 1;
+}
+void sendPrefixedEnd()
+{
+  if (sendPacketVars.localbuffer_active)
+  {
+    printl(LOG_ERROR, "prefixed segment not supported in local buffer\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  if (!sendPacketVars.packet_prefixed_active)
+  {
+    printl(LOG_ERROR, "prefixed segment start not set\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  sendPacketVars.packet_prefixed_end = sendPacketVars.packetindex;
+}
+
 void sendPlayPacketHeader(size_t id)
 {
   if (id < S2C_PLAY_MAPPING_LEN)
@@ -589,41 +639,265 @@ void sendFloat(float v)
 #endif
   sendBuffer((char *)&c, sizeof(uint32_t));
 }
-void sendRawData(char *dat, size_t len)
+static void send_raw_data(char *dat, size_t len)
 {
   for (size_t i = 0; i < len; i++)
   {
-    sendExtByte(dat[i]);
+    send_raw_byte(dat[i]);
   }
 }
-void sendDone()
+static size_t send_raw_varint(int32_t v)
 {
-  size_t packet_len = sendPacketVars.packetindex;
-  // construct the packet header
-  if (sendPacketVars.player->compression_event)
+  size_t i;
+  for (i = 0; i < VARINT_MAX; i++)
   {
-    packet_len++;
-  }
-  // construct a varint for the 'Packet Length' field
-  size_t value = packet_len;
-  for (size_t i = 0; i < 4; i++)
-  {
-    if ((value & ~0x7F) == 0)
+    if ((v & ~0x7F) == 0)
     {
-      sendExtByte(value);
+      send_raw_byte(v);
       break;
     }
 
-    sendExtByte((value & 0x7F) | 0x80);
-    value = (uint32_t)value >> 7;
+    send_raw_byte((v & 0x7F) | 0x80);
+    v = (uint32_t)v >> 7;
   }
-  // varint for the 'Data Length' field
-  if (sendPacketVars.player->compression_event)
+  return i;
+}
+static size_t get_varint_len(int32_t v)
+{
+  uint32_t u = (uint32_t)v;
+
+  if ((u & ~0x7Fu) == 0)
+    return 1;
+  if ((u & ~0x3FFFu) == 0)
+    return 2;
+  if ((u & ~0x1FFFFFu) == 0)
+    return 3;
+  if ((u & ~0x0FFFFFFFu) == 0)
+    return 4;
+  return 5;
+}
+
+static void send_uncompressed()
+{
+  size_t packet_len = sendPacketVars.packetindex;
+  size_t segment_len = 0;
+  if (sendPacketVars.packet_prefixed_active)
   {
-    sendExtByte(0);
+    if (sendPacketVars.packet_prefixed_end < sendPacketVars.packet_prefixed_start || sendPacketVars.packet_prefixed_end > sendPacketVars.packetindex)
+    {
+      printl(LOG_ERROR, "prefixed segment range invalid\n");
+      sendPacketVars.player->remove_player_event = 1;
+      sendPacketVars.packet_prefixed_active = 0;
+      return;
+    }
+    segment_len = sendPacketVars.packet_prefixed_end - sendPacketVars.packet_prefixed_start;
+    packet_len += get_varint_len((int32_t)segment_len);
   }
-  // send the packet
-  sendRawData((char *)sendPacketVars.packetbuffer, sendPacketVars.packetindex);
+  // construct the packet header
+  if (sendPacketVars.player->compression_flag)
+  {
+    packet_len++;
+  }
+  send_raw_varint(packet_len);
+  // varint for the 'Data Length' field
+  if (sendPacketVars.player->compression_flag)
+  {
+    send_raw_varint(0);
+  }
+  // send the marked buffer with its size
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    // send the data prior to the marker
+    send_raw_data((char *)sendPacketVars.packetbuffer, sendPacketVars.packet_prefixed_start);
+    // send the buffer length prefix
+    send_raw_varint((int32_t)segment_len);
+    // send the marked buffer
+    send_raw_data((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_start], segment_len);
+    // send the remaining packet
+    send_raw_data((char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_end], sendPacketVars.packetindex - sendPacketVars.packet_prefixed_end);
+    sendPacketVars.packet_prefixed_active = 0;
+  }
+  else
+  {
+    send_raw_data((char *)sendPacketVars.packetbuffer, sendPacketVars.packetindex);
+  }
+}
+#ifdef COMPRESSION
+
+static size_t varint_buffer(unsigned char buffer[5], int32_t v)
+{
+  if (buffer == NULL)
+  {
+    return 0;
+  }
+  size_t i;
+  for (i = 0; i < VARINT_MAX; i++)
+  {
+    if ((v & ~0x7F) == 0)
+    {
+      *buffer++ = (unsigned char)v;
+      return i + 1;
+    }
+    *buffer++ = (unsigned char)((v & 0x7F) | 0x80);
+    v = (uint32_t)v >> 7;
+  }
+  return VARINT_MAX;
+}
+
+static void *my_zalloc(void *opaque, uInt items, uInt size)
+{
+  (void)opaque;
+  return U_calloc(items, size);
+}
+
+static void my_zfree(void *opaque, voidpf address)
+{
+  (void)opaque;
+  U_free(address);
+}
+
+static int push_raw_compressed(z_streamp strm, unsigned char *data, size_t size, int flag)
+{
+  unsigned char buffer[512];
+  int rc;
+  strm->next_in = data;
+  strm->avail_in = size;
+  strm->next_out = buffer;
+  strm->avail_out = sizeof(buffer);
+  for (;;)
+  {
+    rc = deflate(strm, flag);
+    if (sizeof(buffer) - strm->avail_out > 0)
+    {
+      send_raw_data((char *)buffer, sizeof(buffer) - strm->avail_out);
+    }
+
+    if (rc == Z_STREAM_END)
+    {
+      return Z_OK;
+    }
+    if ((rc != Z_OK) && (rc != Z_BUF_ERROR))
+    {
+      return rc;
+    }
+
+    if (strm->avail_out == 0)
+    {
+      strm->next_out = buffer;
+      strm->avail_out = sizeof(buffer);
+      continue;
+    }
+
+    if (flag == Z_FINISH)
+    {
+      if (rc == Z_BUF_ERROR)
+      {
+        return rc;
+      }
+      strm->next_out = buffer;
+      strm->avail_out = sizeof(buffer);
+      continue;
+    }
+
+    if (strm->avail_in == 0)
+    {
+      return Z_OK;
+    }
+  }
+  return Z_OK;
+}
+
+static void send_compressed()
+{
+  int rc;
+  unsigned char value[5];
+  unsigned char *pkt = NULL;
+  z_stream strm;
+  size_t data_len = sendPacketVars.packetindex;
+  size_t segment_len = 0;
+  size_t data_len_varint_len;
+  size_t len;
+
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    if (sendPacketVars.packet_prefixed_end < sendPacketVars.packet_prefixed_start || sendPacketVars.packet_prefixed_end > sendPacketVars.packetindex)
+    {
+      printl(LOG_ERROR, "prefixed segment range invalid\n");
+      sendPacketVars.player->remove_player_event = 1;
+      sendPacketVars.packet_prefixed_active = 0;
+      return;
+    }
+    segment_len = sendPacketVars.packet_prefixed_end - sendPacketVars.packet_prefixed_start;
+    data_len += get_varint_len((int32_t)segment_len);
+  }
+  data_len_varint_len = get_varint_len((int32_t)data_len);
+  memset(&strm, 0, sizeof(strm));
+  strm.zalloc = my_zalloc;
+  strm.zfree = my_zfree;
+  strm.opaque = Z_NULL;
+  // windowBits=9, memLevel=1, 9KB
+  // 5968+(4×512)+ (256×2)+ (128×4) = 9040 bytes
+  rc = deflateInit2(&strm, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 9, 1, Z_DEFAULT_STRATEGY);
+  if (rc != Z_OK)
+  {
+    printl(LOG_ERROR, "failed to init deflate rc: %d\n", rc);
+    sendPacketVars.player->remove_player_event = 1;
+    sendPacketVars.packet_prefixed_active = 0;
+    return;
+  }
+  send_raw_varint(-2147483648);       // Packet Length, encode 5 bytes and populate it later
+  send_raw_varint((int32_t)data_len); // Data length
+  // send the marked buffer with its size
+  if (sendPacketVars.packet_prefixed_active)
+  {
+    // send the data prior to the marker
+    push_raw_compressed(&strm, sendPacketVars.packetbuffer, sendPacketVars.packet_prefixed_start, Z_SYNC_FLUSH);
+    // send the buffer length prefix
+    len = varint_buffer(value, (int32_t)segment_len);
+    push_raw_compressed(&strm, value, len, Z_SYNC_FLUSH);
+    // send the marked buffer
+    push_raw_compressed(&strm, (unsigned char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_start], segment_len, Z_SYNC_FLUSH);
+    // send the remaining packet
+    push_raw_compressed(&strm, (unsigned char *)&sendPacketVars.packetbuffer[sendPacketVars.packet_prefixed_end], sendPacketVars.packetindex - sendPacketVars.packet_prefixed_end, Z_SYNC_FLUSH);
+    sendPacketVars.packet_prefixed_active = 0;
+  }
+  else
+  {
+    push_raw_compressed(&strm, sendPacketVars.packetbuffer, data_len, Z_SYNC_FLUSH);
+  }
+  push_raw_compressed(&strm, Z_NULL, 0, Z_FINISH);
+  deflateEnd(&strm);
+  // i am not a fan of this but this is the only way i know to populate the actual size
+  if (sendPacketVars.global_buffer_active)
+  {
+    pkt = &sendPacketVars.globalbuffer[sendPacketVars.globalbufferindex] - strm.total_out - data_len_varint_len - VARINT_MAX;
+    len = varint_buffer(pkt, (int32_t)(data_len_varint_len + strm.total_out));
+    memmove(pkt + len, pkt + VARINT_MAX, strm.total_out + data_len_varint_len);
+    sendPacketVars.globalbufferindex -= (VARINT_MAX - len);
+  }
+  else
+  {
+    pkt = &sendPacketVars.buffer[sendPacketVars.bufferindex] - strm.total_out - data_len_varint_len - VARINT_MAX;
+    len = varint_buffer(pkt, (int32_t)(data_len_varint_len + strm.total_out));
+    memmove(pkt + len, pkt + VARINT_MAX, strm.total_out + data_len_varint_len);
+    sendPacketVars.bufferindex -= (VARINT_MAX - len);
+  }
+}
+#endif
+void sendDone()
+{
+#ifdef COMPRESSION
+  if ((sendPacketVars.packetindex >= COMPRESSION_THRESHOLD) && sendPacketVars.player->compression_flag)
+  {
+    send_compressed();
+  }
+  else
+  {
+    send_uncompressed();
+  }
+#else
+  send_uncompressed();
+#endif
   // free uneeded space if its more than MEM_CHUNK_THRESHOLD chunk sizes
   if ((ssize_t)((sendPacketVars.packetsize - sendPacketVars.packetindex) / MEM_CHUNK_SIZE) >= MEM_CHUNK_THRESHOLD)
   {
@@ -644,7 +918,7 @@ void sendDone()
 
 void sendVarInt(int32_t value)
 {
-  for (int i = 0; i < 5; i++)
+  for (int i = 0; i < VARINT_MAX; i++)
   {
     if ((value & ~0x7F) == 0)
     {
@@ -667,6 +941,12 @@ void sendPosition(int32_t x, int32_t y, int32_t z)
 }
 void sendString(const char *str, size_t len)
 {
+  if (str == NULL)
+  {
+    printl(LOG_ERROR, "Send string failed! string is null!\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
   if (len == (size_t)(-1))
   {
     len = strnlen(str, MAX_STRING_SIZE);
@@ -682,6 +962,34 @@ void sendString(const char *str, size_t len)
   {
     sendByte(str[i]);
   }
+}
+void sendFormattedString(const char *str, size_t len)
+{
+  static const unsigned char NBT_text[] = {
+      0x0A, 0x08, 0x00, 0x04, 0x74, 0x65, 0x78, 0x74};
+  if (str == NULL)
+  {
+    printl(LOG_ERROR, "Send formatted string failed! string is null!\n");
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  if (len == (size_t)(-1))
+  {
+    len = strnlen(str, MAX_STRING_SIZE);
+  }
+  if (len > MAX_STRING_SIZE)
+  {
+    printl(LOG_ERROR, "Send formatted string failed! len(%ld) > %ld\n", len, (size_t)MAX_STRING_SIZE);
+    sendPacketVars.player->remove_player_event = 1;
+    return;
+  }
+  sendBuffer((char *)NBT_text, sizeof(NBT_text));
+  sendShort(len);
+  for (uint32_t i = 0; i < len; i++)
+  {
+    sendByte(str[i]);
+  }
+  sendByte(0);
 }
 // TODO: both of these are not correctly implemented but its random right?
 void sendUUID(uint16_t seed)

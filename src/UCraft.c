@@ -37,12 +37,12 @@ static void c2sHandler(readPacketVars_t *readPacketValue)
             currentPlayer->remove_player_event = 1;
             return;
         }
-        if (currentPlayer->compression_event)
+        if (currentPlayer->compression_flag)
         {
             uint8_t compsize = readVarInt();
             if (compsize > 0)
             {
-                printl(LOG_WARN, "UNIMPLEMENTED compressed packet size:%d\n", compsize);
+                printl(LOG_WARN, "UNIMPLEMENTED inbound compressed packet size:%d\n", compsize);
                 if (readPacketValue->pktbytes)
                 {
                     while (readPacketValue->pktbytes)
@@ -152,7 +152,7 @@ static void c2sHandler(readPacketVars_t *readPacketValue)
         case 3: // config state
             if (cmd < C2S_CONFIGURATION_MAPPING_LEN)
             {
-                void (**packet_handler)(player_t *) = c2s_configuration_1_21_5;
+                void (**packet_handler)(player_t *) = c2s_configuration_26_1_2;
                 if (packet_handler[cmd] != NULL)
                 {
                     if (*packet_handler[cmd] != NULL)
@@ -165,7 +165,7 @@ static void c2sHandler(readPacketVars_t *readPacketValue)
         case 4: // play state
             if (cmd < C2S_PLAY_MAPPING_LEN)
             {
-                void (**packet_handler)(player_t *) = c2s_play_1_21_5;
+                void (**packet_handler)(player_t *) = c2s_play_26_1_2;
                 if (packet_handler[cmd] != NULL)
                 {
                     if (*packet_handler[cmd] != NULL)
@@ -247,20 +247,20 @@ static void s2cHandler()
                     PlayS2Ctablist(p, TABLIST_ACTION_ADDPLAYER | TABLIST_ACTION_LISTED, p->id);
                     PlayS2Cspawnentity(p, ENTITY_METADATA_TYPE_PLAYER);
                     PlayS2Centitydata(p, PLAYER_SKIN_PARTS_FLAGS, ENTITY_DATA_BYTE, p->skin_parts); // enable from cape to hat
+                    PlayS2Cteleport(p, p->x, p->y, p->z);
                 }
             }
-            // set the minimum chunk coordinates
-            currentPlayer->chunk_x = -CHUNK_SIZE;
-            currentPlayer->chunk_z = -CHUNK_SIZE;
-
-            currentPlayer->chunk_next_event = 1;
+            gamePlayerSpawned(currentPlayer);
             currentPlayer->logged_on = 1;
             currentPlayer->spawn_event = 0;
         }
         if (currentPlayer->configuration_known_packs_ack_event)
         {
             ConfigurationS2Cregistry();
+            ConfigurationS2Cupdatetags();
             ConfigurationS2Cready();
+            currentPlayer->global_buffer_start_index = sendGetGlobalBufferIndex();
+            currentPlayer->ingame = 1;
             currentPlayer->configuration_known_packs_ack_event = 0;
         }
         if (currentPlayer->configuration_event)
@@ -268,31 +268,6 @@ static void s2cHandler()
             ConfigurationS2Cfeatures();
             ConfigurationS2Cknownpacks();
             currentPlayer->configuration_event = 0;
-        }
-        if (currentPlayer->chunk_next_event)
-        {
-            // dont send multiple chunks at the same time since the client will reject it
-            // TODO: add compression
-            PlayS2Cchunk(currentPlayer, currentPlayer->chunk_x, currentPlayer->chunk_z);
-            if (currentPlayer->chunk_x < CHUNK_SIZE)
-            {
-                currentPlayer->chunk_x++;
-            }
-            else
-            {
-                currentPlayer->chunk_x = -CHUNK_SIZE;
-                currentPlayer->chunk_z++;
-            }
-            if (currentPlayer->chunk_z > CHUNK_SIZE)
-            {
-                PlayS2Cgameevent(EVENT_WAIT_LEVEL_CHUNKS, 1.0f);
-                currentPlayer->chunk_x = 0;
-                currentPlayer->chunk_z = 0;
-                currentPlayer->global_buffer_start_index = sendGetGlobalBufferIndex();
-                currentPlayer->chunk_next_event = 0;
-                currentPlayer->chunk_loaded_event = 1;
-                currentPlayer->ingame = 1;
-            }
         }
 #ifdef ONLINE_MODE
         if (currentPlayer->encryption_event)
@@ -316,7 +291,7 @@ static void s2cHandler()
         {
             // printl(LOG_INFO,"player %d ingame\n",currentPlayer->player_id);
             sendRevertFromGlobalBuffer();
-            if ((main_tick % 1000) == 0)
+            if ((main_tick % 9000) == 0)
             {
                 if (currentPlayer->heartbeat == 0)
                 {
@@ -325,20 +300,6 @@ static void s2cHandler()
                 }
                 PlayS2Cheartbeat(currentPlayer);
                 currentPlayer->heartbeat = 0;
-            }
-            if (currentPlayer->chunk_loaded_event)
-            {
-                PlayS2Cpositionrotation(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
-                PlayS2Ccompassposition(currentPlayer, SPAWN_X, SPAWN_Y, SPAWN_Z);
-                gameChunkLoaded(currentPlayer);
-                currentPlayer->chunk_loaded_event = 0;
-            }
-            // check if the conditions for a chunk update are met
-            if (currentPlayer->chunk_x != currentPlayer->chunk_px || currentPlayer->chunk_z != currentPlayer->chunk_pz)
-            {
-                PlayS2Cchunkcenter(currentPlayer, currentPlayer->chunk_x, currentPlayer->chunk_z);
-                currentPlayer->chunk_px = currentPlayer->chunk_x;
-                currentPlayer->chunk_pz = currentPlayer->chunk_z;
             }
             if (currentPlayer->teleport)
             {
@@ -466,13 +427,16 @@ static void s2cHandler()
                 if (currentPlayer->entity_action_id & 0x20)
                 {
                     PlayS2Centitydata(currentPlayer, ENTITY_POSE, ENTITY_DATA_POSE, STATE_SNEAKING);
+                    currentPlayer->sneaking = 1;
                 }
                 else
                 {
                     PlayS2Centitydata(currentPlayer, ENTITY_POSE, ENTITY_DATA_POSE, STATE_STANDING);
+                    currentPlayer->sneaking = 0;
                 }
                 currentPlayer->entity_action_event = 0;
             }
+            gamePlayerGlobalTickOthers(currentPlayer);
             currentPlayer->global_buffer_end_index = sendGetGlobalBufferIndex();
             // Code below will brodcast to current player and the rest of the players while above will be for other players only
             if (currentPlayer->chat_event)
@@ -718,6 +682,7 @@ int UCraftStart(uint8_t *cleanup_flag)
         }
         main_tick++;
     }
+    gameCleanup();
     UCraftCleanup();
     return 0;
 }

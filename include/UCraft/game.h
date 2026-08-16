@@ -1,38 +1,52 @@
 #ifndef _GAME_H
 #define _GAME_H
+
 #include "config.h"
 #include "wrapper.h"
 
 typedef struct player_t player_t;
+typedef struct game_player_data_t game_player_data_t;
+typedef struct game_data_t game_data_t;
+typedef struct inventory_slots_t inventory_slots_t;
 
-// server stuff
-struct gameData_t
+struct game_player_data_t
 {
-    uint8_t blocks[(2 * GAME_RADIUS * 2 * GAME_RADIUS + 7) / 8]; // bitset
-    int32_t centerX, centerY, centerZ;
-    size_t initalPlayers;
-    size_t players;
-    size_t startDelay; // in ticks
-    uint8_t isStarted : 1;
+    // Chunk events
+    uint8_t chunk_load_event : 1;
+    uint8_t chunk_spawn_event : 1;
+    uint8_t action_item_event : 2;
+    // Block events
+    uint8_t block_update_event : 1;
+    uint8_t block_ack_event : 1;
+    // Inventory events
+    uint8_t full_inventory_update_event : 1;
+    uint8_t inventory_crafting_event : 1;
+    // Crafting
+    uint8_t crafting_table_event : 1;
+    inventory_slots_t *crafting_menu;
+    // Inventory slot
+    int16_t inventory_slot;
+    // Block actions
+    int32_t block_state;
+    uint8_t block_face;
+    int32_t block_x, block_y, block_z;
+    uint32_t block_sequence;
+    // Chunk
+    int32_t chunk_x, chunk_z, chunk_lx, chunk_lz;
 };
-typedef struct gameData_t gameData_t;
-// per player stuff
-struct gamePlayerData_t
+
+struct game_data_t
 {
-    int32_t bx, bz; // previous block
-    size_t timeout;
-    size_t ongroundtimeout;
-    uint8_t isPlaying : 1;
-    uint8_t isSpectating : 1;
+    size_t time;
 };
-typedef struct gamePlayerData_t gamePlayerData_t;
 
 void gamePreload();
-void gameChunkLoaded(player_t *currentPlayer);
-void gameGlobalPlayerMoved(player_t *currentPlayer);
+void gameCleanup();
+void gamePlayerSpawned(player_t *currentPlayer);
 void gamePlayerLeft(player_t *currentPlayer);
 void gameGlobalTick();
 void gamePlayerGlobalTick(player_t *currentPlayer);
+void gamePlayerGlobalTickOthers(player_t *currentPlayer);
 void gamePlayerLocalTick(player_t *currentPlayer);
 
 #endif
