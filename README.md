@@ -1,41 +1,54 @@
-# Ucraft
+# UCraft
 A lightweight **Minecraft server implementation written in C**, designed for machines with limited resources.
 
-Currently supports **Minecraft version 26.1.2** for clients.  
-Implementation details for a **lightbulb** can be found [here][5].
+<p align="center">
+  <img src="screenshot.png" alt="UCraft terrain generation" width="640" />
+</p>
+<p align="center"><em>Procedurally generated terrain</em></p>
 
-### Building
-The server was built and tested on a linux machine. To build on a Windows machine, MSVC is required.
+UCraft implements just the bare essentials of the Minecraft protocol: clients can join,
+explore a procedurally generated world, chat, and break and place blocks. It provides the
+foundation for **very primitive Minecraft gameplay** — not a full server replacement.
+
+Currently supports **Minecraft 26.1.2** clients.
+Implementation details for running on a **lightbulb** (BL602 MCU) can be found [here](https://github.com/vimpop/UCraft-bl602).
+
+## Features
+
+- **Procedural terrain generation** — an explorable world generated on demand as players move around
+- **Primitive Minecraft gameplay** — walk around, chat with other players, and break/place blocks
+- **Online-mode encryption** — authenticated logins through mbedTLS, or offline mode without it
+- **Tiny footprint** — ~46K-byte binary without authentication (~70K with), and ~50K bytes of memory on average (for a single player)
+
+## Building
+
+The server was built and tested on Linux. On Windows, MSVC is required.
+
+```bash
+sudo apt install git build-essential cmake make
+git clone https://github.com/vimpop/UCraft/
+cd UCraft && mkdir build && cd build
+cmake ..
+make
 ```
-$ sudo apt install git build-essential cmake make
-$ git clone https://github.com/vimpop/UCraft/
-$ cd ~/UCraft && mkdir build && cd build 
-$ cmake ..
-$ make
-```
-In the ```build/src``` folder an executable by the name of ```UCraft``` will be produced that can be ran.
-```
-$ ./src/UCraft
+
+This produces an executable named `UCraft` in `build/src`.
+
+## Running
+
+```bash
+./src/UCraft
 [INFO]: Listening on *:25565
 [INFO]: UCraft server started!
 ```
-### Benchmarks
-Comparing this server to the vanilla server is unfair because it lacks most, if not all, features of the vanilla server. It only has the basic primitives for a simple minigame like [TNT run][1] which is included in the code. But if you really want them in a **amd64** environment:
-- The server binary size is approximately 46K bytes without authentication and 90K bytes with the authentication library. Memory usage varies based on the number of active players. In the worst-case scenario with 10 players, heap usage will be around 70K bytes with authentication and 20K bytes without authentication.
-- The maximum clients this server can handle is ```FD_SETSIZE``` which is 1024 clients in most machines but has not been tested.
 
+Then connect to `localhost:25565` with a Minecraft **26.1.2** client.
 
-### Credits
-- Thanks to [Bixilon][2] who has helped with major parts of the minecraft protocol
-- [wiki.vg][3] for documenting Minecraft's protocol
+## Credits
 
-### Screenshot
-| ![][4] | 
-|:--:| 
-| *three players playing the game on the server* |
+- [Bixilon](https://bixilon.de/en) for help with major parts of the Minecraft protocol
+- [wiki.vg](https://wiki.vg/Main_Page) for documenting Minecraft's protocol
 
-[1]:https://hypixel.fandom.com/wiki/TNT_Run
-[2]:https://bixilon.de/en
-[3]:https://wiki.vg/Main_Page
-[4]:arena.png
-[5]:https://github.com/vimpop/UCraft-bl602
+## License
+
+[MIT](LICENSE.txt)
