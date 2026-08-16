@@ -31,8 +31,9 @@ cd UCraft && mkdir build && cd build
 cmake ..
 make
 ```
-
 This produces an executable named `UCraft` in `build/src`.
+
+Pre-built binaries are also available as artifacts of the [GitHub Actions](https://github.com/vimpop/UCraft/actions) workflow runs.
 
 ## Running
 
