@@ -11,7 +11,6 @@ explore a procedurally generated world, chat, and break and place blocks. It pro
 foundation for **very primitive Minecraft gameplay** — not a full server replacement.
 
 Currently supports **Minecraft 26.1.2** clients.
-Implementation details for running on a **lightbulb** (BL602 MCU) can be found [here](https://github.com/vimpop/UCraft-bl602).
 
 ## Features
 
@@ -44,6 +43,13 @@ Pre-built binaries are also available as artifacts of the [GitHub Actions](https
 ```
 
 Then connect to `localhost:25565` with a Minecraft **26.1.2** client.
+
+## Implementations
+
+- **Lightbulb** (BL602 MCU) — implementation details [here](https://github.com/vimpop/UCraft-bl602)
+- **Samsung C410W Printer** (ARM BE MCU) - implementation details [here](https://github.com/vimpop/UCraft-printer)
+
+*Your implementation could also be here! (feel free to open up a issue with your implementation)*
 
 ## Credits
 
