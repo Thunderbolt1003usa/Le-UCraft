@@ -22,7 +22,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         build_type: [Release]
         c_compiler: [gcc, clang, cl]
         include:
@@ -35,6 +35,9 @@ jobs:
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
+          - os: macos-latest
+            c_compiler: clang
+            cpp_compiler: clang++
         exclude:
           - os: windows-latest
             c_compiler: gcc
@@ -42,6 +45,10 @@ jobs:
             c_compiler: clang
           - os: ubuntu-latest
             c_compiler: cl
+          - os: macos-latest
+            c_compiler: cl
+          - os: macos-latest
+            c_compiler: gcc
 
     steps:
       - uses: actions/checkout@v4
@@ -82,16 +89,16 @@ jobs:
           $dest = Join-Path $outDir "${{ steps.strings.outputs.artifact-name }}.exe"
           Copy-Item $exe.FullName $dest -Force
           Write-Host "Staged $($exe.Name) -> $dest"
-      - name: Stage binary (Linux)
-        if: runner.os == 'Linux'
+      - name: Stage binary (Linux & macOS)
+        if: runner.os == 'Linux' || runner.os == 'macOS'
         shell: bash
         run: |
           set -euo pipefail
           build_dir="${{ steps.strings.outputs.build-output-dir }}/src"
           out_dir="${{ steps.strings.outputs.staging-dir }}"
           mkdir -p "$out_dir"
-          # pick the first executable regular file in build/src, excluding shared libs
-          bin_path="$(find "$build_dir" -maxdepth 1 -type f -executable ! -name '*.so' | head -n 1 || true)"
+          # pick the first executable regular file in build/src, excluding shared libs8
+          bin_path="$(find "$build_dir" -maxdepth 1 -type f -executable ! -name '*.so' ! -name '*.dylib' | head -n 1 || true)"
           if [[ -z "${bin_path}" ]]; then
             echo "No executable found in $build_dir" >&2
             exit 1
