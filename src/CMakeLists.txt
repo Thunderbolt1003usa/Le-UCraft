@@ -23,5 +23,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE zlib)
 
 if(UNIX)
     #run the size command afterwards
-    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD COMMAND size --format=berkeley ${PROJECT_NAME})
+    if(APPLE)
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD COMMAND size ${PROJECT_NAME})
+    else()
+        add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD COMMAND size --format=berkeley ${PROJECT_NAME})
+    endif()
 endif()
