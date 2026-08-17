@@ -54,7 +54,7 @@ double readDouble()
   double v;
   readBuffer((char *)&c, sizeof(uint64_t));
 #if (ENDIAN)
-  c = __bswap_64(c);
+  c = __builtin_bswap64(c);
 #endif
   memcpy(&v, &c, sizeof(double));
   return v;
@@ -65,7 +65,7 @@ float readFloat()
   float v;
   readBuffer((char *)&c, sizeof(uint32_t));
 #if (ENDIAN)
-  c = __bswap_32(c);
+  c = __builtin_bswap32(c);
 #endif
   memcpy(&v, &c, sizeof(float));
   return v;
@@ -75,7 +75,7 @@ int64_t readLong()
   int64_t c;
   readBuffer((char *)&c, sizeof(int64_t));
 #if (ENDIAN)
-  c = __bswap_64(c);
+  c = __builtin_bswap64(c);
 #endif
   return c;
 }
@@ -111,7 +111,7 @@ void readPosition(int32_t *x, int32_t *y, int32_t *z)
   uint64_t pos;
   readBuffer((char *)&pos, sizeof(uint64_t));
 #if (ENDIAN)
-  pos = __bswap_64(pos);
+  pos = __builtin_bswap64(pos);
 #endif
   *x = (pos >> 38) & 0x3FFFFFF;
   *z = (pos >> 12) & 0x3FFFFFF;
@@ -595,7 +595,7 @@ void sendInt(int32_t v)
 {
   int32_t c;
 #if (ENDIAN)
-  c = __bswap_32(v);
+  c = __builtin_bswap32(v);
 #else
   c = v;
 #endif
@@ -605,7 +605,7 @@ void sendShort(int16_t v)
 {
   uint16_t c;
 #if (ENDIAN)
-  c = __bswap_16(v);
+  c = __builtin_bswap16(v);
 #else
   c = v;
 #endif
@@ -615,7 +615,7 @@ void sendLong(int64_t v)
 {
   int64_t c;
 #if (ENDIAN)
-  c = __bswap_64(v);
+  c = __builtin_bswap64(v);
 #else
   c = v;
 #endif
@@ -626,7 +626,7 @@ void sendDouble(double v)
   uint64_t c;
   memcpy(&c, &v, sizeof(uint64_t));
 #if (ENDIAN)
-  c = __bswap_64(c);
+  c = __builtin_bswap64(c);
 #endif
   sendBuffer((char *)&c, sizeof(uint64_t));
 }
@@ -635,7 +635,7 @@ void sendFloat(float v)
   uint32_t c;
   memcpy(&c, &v, sizeof(uint32_t));
 #if (ENDIAN)
-  c = __bswap_32(c);
+  c = __builtin_bswap32(c);
 #endif
   sendBuffer((char *)&c, sizeof(uint32_t));
 }
@@ -935,7 +935,7 @@ void sendPosition(int32_t x, int32_t y, int32_t z)
 {
   uint64_t pos = (((uint64_t)x & 0x3FFFFFF) << 38) | (((uint64_t)z & 0x3FFFFFF) << 12) | ((uint64_t)y & 0xFFF);
 #if (ENDIAN)
-  pos = __bswap_64(pos);
+  pos = __builtin_bswap64(pos);
 #endif
   sendBuffer((char *)&pos, sizeof(uint64_t));
 }

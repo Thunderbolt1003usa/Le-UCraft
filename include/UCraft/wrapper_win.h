@@ -32,9 +32,9 @@ typedef long long ssize_t; /* windows 64 bits */
 typedef int socklen_t;
 
 // Endian swapping definitions
-#define __bswap_16(x) _byteswap_ushort(x)
-#define __bswap_32(x) _byteswap_ulong(x)
-#define __bswap_64(x) _byteswap_uint64(x)
+#define __builtin_bswap16(x) _byteswap_ushort(x)
+#define __builtin_bswap32(x) _byteswap_ulong(x)
+#define __builtin_bswap64(x) _byteswap_uint64(x)
 
 // Misc functions
 static inline void U_wrapperStart()

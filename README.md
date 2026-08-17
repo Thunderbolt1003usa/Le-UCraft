@@ -22,7 +22,7 @@ Implementation details for running on a **lightbulb** (BL602 MCU) can be found [
 
 ## Building
 
-The server was built and tested on Linux. On Windows, MSVC is required.
+The server was built and tested on Linux. On Windows, MSVC is required and on macOS, Xcode Command Line Tools and CMake are required.
 
 ```bash
 sudo apt install git build-essential cmake make
