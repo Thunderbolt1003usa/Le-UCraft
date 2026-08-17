@@ -97,7 +97,7 @@ jobs:
           build_dir="${{ steps.strings.outputs.build-output-dir }}/src"
           out_dir="${{ steps.strings.outputs.staging-dir }}"
           mkdir -p "$out_dir"
-          # pick the first executable regular file in build/src, excluding shared libs8
+          # pick the first executable regular file in build/src, excluding shared libs
           bin_path="$(find "$build_dir" -maxdepth 1 -type f -exec test -x {} \; ! -name '*.so' ! -name '*.dylib' -print | head -n 1 || true)"
           if [[ -z "${bin_path}" ]]; then
             echo "No executable found in $build_dir" >&2
