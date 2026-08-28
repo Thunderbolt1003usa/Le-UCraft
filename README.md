@@ -25,16 +25,17 @@ The server was built and tested on Linux. On Windows, MSVC is required and on ma
 
 ```bash
 sudo apt install git build-essential cmake make
-git clone https://github.com/vimpop/UCraft/
-cd UCraft && mkdir build && cd build
-cmake ..
+git clone https://github.com/<dein-fork>/UCraft.git
+cd UCraft
+mkdir build && cd build
+cmake .. -DCMAKE_DISABLE_FIND_PACKAGE_MbedTLS=TRUE
 make
 ```
 This produces an executable named `UCraft` in `build/src`.
 
 Pre-built binaries are also available as artifacts of the [GitHub Actions](https://github.com/vimpop/UCraft/actions) workflow runs.
 
-## Running
+## Running only in RAM
 
 ```bash
 ./src/UCraft
@@ -43,6 +44,26 @@ Pre-built binaries are also available as artifacts of the [GitHub Actions](https
 ```
 
 Then connect to `localhost:25565` with a Minecraft **26.1.2** client.
+
+## Running persistent
+
+```bash
+./src/UCraft -save=save.uc
+[INFO]: Listening on *:25565
+[INFO]: UCraft server started!
+```
+
+Then connect to `localhost:25565` with a Minecraft **26.1.2** client.
+
+## Running persistent and with custom port
+
+```bash
+./src/UCraft -port=12345 -save=save.uc
+[INFO]: Listening on *:12345
+[INFO]: UCraft server started!
+```
+
+Then connect to `localhost:12345` with a Minecraft **26.1.2** client.
 
 ## Implementations
 
