@@ -1,0 +1,349 @@
+diff --git a/include/UCraft/UCraft.h b/include/UCraft/UCraft.h
+index 5e55250..377b836 100644
+--- a/include/UCraft/UCraft.h
++++ b/include/UCraft/UCraft.h
+@@ -2,5 +2,17 @@
+ #define _UCRAFT_H
+ #include <stdint.h>
+ extern size_t main_tick;
++
++// Must be called (if at all) BEFORE UCraftStart(). Overrides the compile
++// time PORT define from config.h.
++void UCraftSetPort(int port);
++
++// Must be called (if at all) BEFORE UCraftStart(). When set, the world's
++// block diffs are loaded from this path on startup (if it exists) and
++// written back to it on clean shutdown + periodic autosave. The string is
++// NOT copied, so it must stay valid for the lifetime of the server (e.g.
++// pass argv[i] directly).
++void UCraftSetSavePath(const char *path);
++
+ int UCraftStart(uint8_t *cleanup_flag);
+ #endif
+\ No newline at end of file
+diff --git a/include/UCraft/blocks.h b/include/UCraft/blocks.h
+index 320e50d..ee6a1d3 100644
+--- a/include/UCraft/blocks.h
++++ b/include/UCraft/blocks.h
+@@ -46,4 +46,11 @@ void blocksCleanup();
+ bool blocksUpdate(blocksDefaultState state, int32_t x, int16_t y, int32_t z);
+ Blocks *blocksGet(int32_t chunk_x, int32_t chunk_z);
+ int32_t blocksGetBlock(int32_t x, int16_t y, int32_t z);
++
++// Persistence: dumps/restores only the block *diffs* (player placed/broken
++// blocks) that live in the coordinate hashmap. The procedurally generated
++// terrain itself is never stored, only recreated on the fly (see world.c),
++// so save files stay tiny even for large worlds.
++bool blocksSave(const char *path);
++bool blocksLoad(const char *path);
+ #endif
+diff --git a/src/UCraft.c b/src/UCraft.c
+index e063685..e5bf1b6 100644
+--- a/src/UCraft.c
++++ b/src/UCraft.c
+@@ -16,10 +16,28 @@
+ #include "enums.h"
+ #include "encryption.h"
+ #include "https.h"
++#include "blocks.h"
+ 
+ int server_fd = -1;
+ size_t main_tick = 0;
+ 
++static int serverPort = PORT;
++static const char *worldSavePath = NULL;
++
++// autosave every 60 seconds as a safety net in addition to the
++// save-on-clean-shutdown below.
++#define AUTOSAVE_INTERVAL_MS (60ull * 1000ull)
++
++void UCraftSetPort(int port)
++{
++    serverPort = port;
++}
++
++void UCraftSetSavePath(const char *path)
++{
++    worldSavePath = path;
++}
++
+ static void c2sHandler(readPacketVars_t *readPacketValue)
+ {
+     player_t *currentPlayer = readPacketValue->player;
+@@ -547,7 +565,7 @@ int UCraftStart(uint8_t *cleanup_flag)
+     }
+     address.sin_family = AF_INET;
+     address.sin_addr.s_addr = INADDR_ANY;
+-    address.sin_port = htons(PORT);
++    address.sin_port = htons(serverPort);
+     if (U_bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0)
+     {
+         printl(LOG_ERROR, "bind error fd:%d\n", server_fd);
+@@ -560,7 +578,7 @@ int UCraftStart(uint8_t *cleanup_flag)
+         UCraftCleanup();
+         return 1;
+     }
+-    printl(LOG_INFO, "Listening on *:%d\n", PORT);
++    printl(LOG_INFO, "Listening on *:%d\n", serverPort);
+     FD_ZERO(playerGetSet());
+     FD_SET(server_fd, playerGetSet());
+     timeout.tv_sec = 0;
+@@ -570,6 +588,11 @@ int UCraftStart(uint8_t *cleanup_flag)
+     printl(LOG_INFO, "UCraft server started!\n");
+     printl(LOG_INFO, "Supported client version: %s\n", CLIENT_VERSION);
+     gamePreload();
++    if (worldSavePath != NULL)
++    {
++        blocksLoad(worldSavePath);
++    }
++    uint64_t last_autosave_ms = U_millis();
+     while (1)
+     {
+         uint64_t startms = U_millis();
+@@ -577,6 +600,11 @@ int UCraftStart(uint8_t *cleanup_flag)
+         {
+             break;
+         }
++        if (worldSavePath != NULL && (startms - last_autosave_ms) >= AUTOSAVE_INTERVAL_MS)
++        {
++            blocksSave(worldSavePath);
++            last_autosave_ms = startms;
++        }
+         memcpy(&set, playerGetSet(), sizeof(fd_set));
+         rv = U_select(max_sock + 1, &set, NULL, NULL, &timeout);
+         if (rv == -1)
+@@ -682,6 +710,11 @@ int UCraftStart(uint8_t *cleanup_flag)
+         }
+         main_tick++;
+     }
++    if (worldSavePath != NULL)
++    {
++        printl(LOG_INFO, "Shutting down, saving world...\n");
++        blocksSave(worldSavePath);
++    }
+     gameCleanup();
+     UCraftCleanup();
+     return 0;
+diff --git a/src/blocks.c b/src/blocks.c
+index 6b74317..6c7c25a 100644
+--- a/src/blocks.c
++++ b/src/blocks.c
+@@ -357,3 +357,165 @@ int32_t blocksGetBlock(int32_t x, int16_t y, int32_t z)
+     // maybe its a terrain block
+     return worldGetBlock(x, y, z);
+ }
++
++#define WORLD_SAVE_MAGIC ((uint32_t)0x55435631u) /* "UCV1" */
++#define WORLD_SAVE_VERSION ((uint32_t)1u)
++
++bool blocksSave(const char *path)
++{
++    if (path == NULL)
++    {
++        return false;
++    }
++
++    FILE *f = fopen(path, "wb");
++    if (f == NULL)
++    {
++        printl(LOG_ERROR, "blocksSave: could not open '%s' for writing\n", path);
++        return false;
++    }
++
++    uint64_t chunk_count = 0;
++    for (size_t i = 0; i < coordinate_map.capacity; i++)
++    {
++        HashEntry *entry = &coordinate_map.entries[i];
++        if (entry->state == SLOT_OCCUPIED && entry->blocks != NULL && entry->blocks->count > 0)
++        {
++            chunk_count++;
++        }
++    }
++
++    uint32_t magic = WORLD_SAVE_MAGIC;
++    uint32_t version = WORLD_SAVE_VERSION;
++    uint32_t world_seed = (uint32_t)WORLD_SEED;
++    bool ok = true;
++    ok = ok && fwrite(&magic, sizeof(magic), 1, f) == 1;
++    ok = ok && fwrite(&version, sizeof(version), 1, f) == 1;
++    ok = ok && fwrite(&world_seed, sizeof(world_seed), 1, f) == 1;
++    ok = ok && fwrite(&chunk_count, sizeof(chunk_count), 1, f) == 1;
++
++    for (size_t i = 0; ok && i < coordinate_map.capacity; i++)
++    {
++        HashEntry *entry = &coordinate_map.entries[i];
++        if (entry->state != SLOT_OCCUPIED || entry->blocks == NULL || entry->blocks->count == 0)
++        {
++            continue;
++        }
++        int32_t chunk_x = (int32_t)(uint32_t)(entry->key >> 32);
++        int32_t chunk_z = (int32_t)(uint32_t)(entry->key & 0xFFFFFFFFu);
++        uint32_t block_count = (uint32_t)entry->blocks->count;
++
++        ok = ok && fwrite(&chunk_x, sizeof(chunk_x), 1, f) == 1;
++        ok = ok && fwrite(&chunk_z, sizeof(chunk_z), 1, f) == 1;
++        ok = ok && fwrite(&block_count, sizeof(block_count), 1, f) == 1;
++
++        for (size_t b = 0; ok && b < entry->blocks->count; b++)
++        {
++            Block *blk = &entry->blocks->block[b];
++            uint8_t bx = blk->c.x;
++            int16_t by = blk->c.y;
++            uint8_t bz = blk->c.z;
++            int32_t state = blk->default_state;
++            ok = ok && fwrite(&bx, sizeof(bx), 1, f) == 1;
++            ok = ok && fwrite(&by, sizeof(by), 1, f) == 1;
++            ok = ok && fwrite(&bz, sizeof(bz), 1, f) == 1;
++            ok = ok && fwrite(&state, sizeof(state), 1, f) == 1;
++        }
++    }
++
++    if (fclose(f) != 0)
++    {
++        ok = false;
++    }
++
++    if (!ok)
++    {
++        printl(LOG_ERROR, "blocksSave: write error while saving to '%s'\n", path);
++        return false;
++    }
++    printl(LOG_INFO, "World saved to '%s' (%llu chunk(s) with edits)\n", path, (unsigned long long)chunk_count);
++    return true;
++}
++
++bool blocksLoad(const char *path)
++{
++    if (path == NULL)
++    {
++        return false;
++    }
++
++    FILE *f = fopen(path, "rb");
++    if (f == NULL)
++    {
++        // no save file yet, e.g. first run - not an error
++        printl(LOG_INFO, "No existing save file at '%s', starting with a fresh world\n", path);
++        return false;
++    }
++
++    uint32_t magic = 0, version = 0, world_seed = 0;
++    uint64_t chunk_count = 0;
++    bool ok = true;
++    ok = ok && fread(&magic, sizeof(magic), 1, f) == 1;
++    ok = ok && fread(&version, sizeof(version), 1, f) == 1;
++    ok = ok && fread(&world_seed, sizeof(world_seed), 1, f) == 1;
++    ok = ok && fread(&chunk_count, sizeof(chunk_count), 1, f) == 1;
++
++    if (!ok || magic != WORLD_SAVE_MAGIC)
++    {
++        printl(LOG_ERROR, "blocksLoad: '%s' is not a valid UCraft save file\n", path);
++        fclose(f);
++        return false;
++    }
++    if (version != WORLD_SAVE_VERSION)
++    {
++        printl(LOG_ERROR, "blocksLoad: unsupported save file version %u in '%s'\n", version, path);
++        fclose(f);
++        return false;
++    }
++    if (world_seed != (uint32_t)WORLD_SEED)
++    {
++        printl(LOG_WARN, "blocksLoad: save file seed (%u) differs from current WORLD_SEED (%d) - saved edits may land on different terrain\n", world_seed, WORLD_SEED);
++    }
++
++    uint64_t loaded_blocks = 0;
++    for (uint64_t i = 0; ok && i < chunk_count; i++)
++    {
++        int32_t chunk_x = 0, chunk_z = 0;
++        uint32_t block_count = 0;
++        ok = ok && fread(&chunk_x, sizeof(chunk_x), 1, f) == 1;
++        ok = ok && fread(&chunk_z, sizeof(chunk_z), 1, f) == 1;
++        ok = ok && fread(&block_count, sizeof(block_count), 1, f) == 1;
++        if (!ok)
++        {
++            break;
++        }
++
++        for (uint32_t b = 0; b < block_count; b++)
++        {
++            uint8_t bx = 0, bz = 0;
++            int16_t by = 0;
++            int32_t state = 0;
++            if (fread(&bx, sizeof(bx), 1, f) != 1 ||
++                fread(&by, sizeof(by), 1, f) != 1 ||
++                fread(&bz, sizeof(bz), 1, f) != 1 ||
++                fread(&state, sizeof(state), 1, f) != 1)
++            {
++                ok = false;
++                break;
++            }
++            int32_t world_x = (chunk_x << 4) + bx;
++            int32_t world_z = (chunk_z << 4) + bz;
++            blocksUpdate((blocksDefaultState)state, world_x, by, world_z);
++            loaded_blocks++;
++        }
++    }
++
++    fclose(f);
++    if (!ok)
++    {
++        printl(LOG_ERROR, "blocksLoad: file '%s' appears truncated or corrupt, partial world may have been restored\n", path);
++        return false;
++    }
++    printl(LOG_INFO, "World loaded from '%s' (%llu chunk(s), %llu block edit(s))\n", path, (unsigned long long)chunk_count, (unsigned long long)loaded_blocks);
++    return true;
++}
+diff --git a/src/main.c b/src/main.c
+index f8b0a18..46c10a3 100644
+--- a/src/main.c
++++ b/src/main.c
+@@ -14,9 +14,47 @@ void cleanup()
+   // clean up flag
+   cleanup_flag = 1;
+ }
++
++static int parse_arg_int(const char *value, const char *flag_name, int fallback)
++{
++  char *end = NULL;
++  long parsed = strtol(value, &end, 10);
++  if (end == value || *end != '\0' || parsed <= 0 || parsed > 65535)
++  {
++    fprintf(stderr, "Invalid value for -%s: '%s' (expected 1-65535), keeping default\n", flag_name, value);
++    return fallback;
++  }
++  return (int)parsed;
++}
++
+ int main(int argc, char const *argv[])
+ {
+   signal(SIGINT, cleanup);
++  signal(SIGTERM, cleanup);
++
++  for (int i = 1; i < argc; i++)
++  {
++    if (strncmp(argv[i], "-port=", 6) == 0)
++    {
++      UCraftSetPort(parse_arg_int(argv[i] + 6, "port", 25565));
++    }
++    else if (strncmp(argv[i], "-save=", 6) == 0)
++    {
++      if (argv[i][6] == '\0')
++      {
++        fprintf(stderr, "-save= requires a file path, e.g. -save=world.uc\n");
++      }
++      else
++      {
++        UCraftSetSavePath(argv[i] + 6);
++      }
++    }
++    else
++    {
++      fprintf(stderr, "Unknown argument: %s (supported: -port=<port>, -save=<file>)\n", argv[i]);
++    }
++  }
++
+   UCraftStart(&cleanup_flag);
+   return 0;
+ }
+\ No newline at end of file
