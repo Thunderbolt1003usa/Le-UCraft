@@ -27,6 +27,7 @@ The server was built and tested on Linux. On Windows, MSVC is required and on ma
 sudo apt install git build-essential cmake make
 git clone https://github.com/<dein-fork>/UCraft.git
 cd UCraft
+git apply ucraft-persistence.patch
 mkdir build && cd build
 cmake .. -DCMAKE_DISABLE_FIND_PACKAGE_MbedTLS=TRUE
 make
